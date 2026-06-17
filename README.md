@@ -1,3 +1,5 @@
+![FlowStar](./flowstar-banner.png)
+
 # FlowStar
 
 Real-time token streaming on Stellar. Send tokens that unlock continuously by the second — perfect for payroll, token vesting, and grants. Built on Soroban smart contracts.
