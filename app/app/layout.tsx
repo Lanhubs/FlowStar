@@ -1,5 +1,10 @@
-import type { ReactNode } from 'react'
+import type { Metadata, ReactNode } from 'react'
 import { Navbar } from '@/components/layout/navbar'
+
+export const metadata: Metadata = {
+  title: 'Dashboard',
+  description: 'Manage your active and historical token streams on Stellar.',
+}
 
 export default function AppLayout({ children }: { children: ReactNode }) {
   return (

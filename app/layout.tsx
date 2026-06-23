@@ -12,10 +12,35 @@ const geistMono = Geist_Mono({
 })
 
 export const metadata: Metadata = {
-  title: 'FlowStar — Real-time token streaming on Stellar',
+  title: {
+    default: 'FlowStar — Stream tokens by the second on Stellar',
+    template: '%s | FlowStar',
+  },
   description:
     'Stream tokens by the second on Stellar. Create vesting schedules, payroll, and grants that unlock continuously — withdraw anytime, cancel anytime.',
-  generator: 'v0.app',
+  metadataBase: new URL('https://flowstar.app'),
+  openGraph: {
+    type: 'website',
+    siteName: 'FlowStar',
+    title: 'FlowStar — Stream tokens by the second on Stellar',
+    description:
+      'Stream tokens by the second on Stellar. Create vesting schedules, payroll, and grants that unlock continuously — withdraw anytime, cancel anytime.',
+    images: [{ url: '/og-image.png', width: 1200, height: 630, alt: 'FlowStar' }],
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'FlowStar — Stream tokens by the second on Stellar',
+    description:
+      'Stream tokens by the second on Stellar. Create vesting schedules, payroll, and grants that unlock continuously — withdraw anytime, cancel anytime.',
+    images: ['/og-image.png'],
+  },
+  icons: {
+    icon: [
+      { url: '/icon-light-32x32.png', sizes: '32x32', type: 'image/png' },
+      { url: '/icon.svg', type: 'image/svg+xml' },
+    ],
+    apple: '/apple-icon.png',
+  },
 }
 
 export const viewport: Viewport = {
