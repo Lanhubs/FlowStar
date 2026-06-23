@@ -1,8 +1,8 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
-import { ArrowLeft, ArrowRight, Info } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Info, Loader2 } from 'lucide-react'
 import Link from 'next/link'
 import { toast } from 'sonner'
 import { RequireWallet } from '@/components/layout/require-wallet'
@@ -29,9 +29,27 @@ function toUnixSeconds(localDatetimeValue: string): bigint {
 
 function localDatetimeMin(offsetSeconds = 0): string {
   const d = new Date(Date.now() + offsetSeconds * 1000)
-  // Format as YYYY-MM-DDTHH:MM required by datetime-local
   return d.toISOString().slice(0, 16)
 }
+
+function addDuration(baseDatetime: string, seconds: number): string {
+  const base = new Date(baseDatetime)
+  return new Date(base.getTime() + seconds * 1000).toISOString().slice(0, 16)
+}
+
+const DURATION_PRESETS = [
+  { label: '1 week', seconds: 7 * 24 * 3600 },
+  { label: '1 month', seconds: 30 * 24 * 3600 },
+  { label: '3 months', seconds: 90 * 24 * 3600 },
+  { label: '6 months', seconds: 180 * 24 * 3600 },
+  { label: '1 year', seconds: 365 * 24 * 3600 },
+] as const
+
+const CLIFF_PRESETS = [
+  { label: 'No cliff', seconds: 0 },
+  { label: '1 month', seconds: 30 * 24 * 3600 },
+  { label: '3 months', seconds: 90 * 24 * 3600 },
+] as const
 
 interface FormState {
   recipient: string
@@ -46,7 +64,9 @@ interface FormState {
 
 function CreateForm() {
   const router = useRouter()
-  const { createStream, pending, error } = useContract()
+  const { createStream, estimateFee, pending, error } = useContract()
+  const [feeEstimate, setFeeEstimate] = useState<string | null>(null)
+  const [estimatingFee, setEstimatingFee] = useState(false)
 
   const defaultStart = localDatetimeMin(60) // 1 min from now
   const defaultEnd = localDatetimeMin(60 + 30 * 24 * 3600) // +30 days
@@ -99,27 +119,46 @@ function CreateForm() {
     return Object.keys(newErrors).length === 0
   }
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    if (!validate()) return
-
+  const buildInput = useCallback(() => {
     const startTime = toUnixSeconds(form.startDate)
     const endTime = toUnixSeconds(form.endDate)
     const cliffTime = form.hasCliff ? toUnixSeconds(form.cliffDate) : startTime
     const cliffAmount = form.hasCliff && form.cliffAmount
       ? parseTokenAmount(form.cliffAmount, selectedToken.decimals)
       : 0n
+    return {
+      recipient: form.recipient.trim(),
+      token: selectedToken,
+      totalAmount: parseTokenAmount(form.amount, selectedToken.decimals),
+      startTime,
+      endTime,
+      cliffTime,
+      cliffAmount,
+    }
+  }, [form, selectedToken])
+
+  async function handleEstimateFee() {
+    if (!validate()) return
+    setEstimatingFee(true)
+    setFeeEstimate(null)
+    try {
+      const estimate = await estimateFee(buildInput())
+      if (estimate) {
+        setFeeEstimate(estimate.estimatedFeeXlm)
+      }
+    } catch {
+      setFeeEstimate(null)
+    } finally {
+      setEstimatingFee(false)
+    }
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    if (!validate()) return
 
     try {
-      const id = await createStream({
-        recipient: form.recipient.trim(),
-        token: selectedToken,
-        totalAmount: parseTokenAmount(form.amount, selectedToken.decimals),
-        startTime,
-        endTime,
-        cliffTime,
-        cliffAmount,
-      })
+      const id = await createStream(buildInput())
       toast.success('Stream created', { description: `Stream #${id} is live.` })
       router.push(`/app/stream/${id}`)
     } catch {
@@ -243,6 +282,23 @@ function CreateForm() {
             </div>
           </div>
 
+          {/* Duration presets */}
+          <div className="space-y-1.5">
+            <Label className="text-xs text-muted-foreground">Quick duration</Label>
+            <div className="flex flex-wrap gap-2">
+              {DURATION_PRESETS.map((preset) => (
+                <button
+                  key={preset.label}
+                  type="button"
+                  onClick={() => set('endDate', addDuration(form.startDate, preset.seconds))}
+                  className="rounded-full border border-border bg-background px-3 py-1 text-xs font-medium text-muted-foreground transition-colors hover:border-primary hover:text-primary"
+                >
+                  {preset.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
           {/* Cliff toggle */}
           <div className="flex items-start gap-3 pt-1">
             <input
@@ -261,7 +317,30 @@ function CreateForm() {
           </div>
 
           {form.hasCliff && (
-            <div className="grid gap-4 sm:grid-cols-2 pt-1">
+            <div className="space-y-4 pt-1">
+            {/* Cliff presets */}
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground">Quick cliff</Label>
+              <div className="flex flex-wrap gap-2">
+                {CLIFF_PRESETS.map((preset) => (
+                  <button
+                    key={preset.label}
+                    type="button"
+                    onClick={() => {
+                      if (preset.seconds === 0) {
+                        set('hasCliff', false)
+                      } else {
+                        set('cliffDate', addDuration(form.startDate, preset.seconds))
+                      }
+                    }}
+                    className="rounded-full border border-border bg-background px-3 py-1 text-xs font-medium text-muted-foreground transition-colors hover:border-primary hover:text-primary"
+                  >
+                    {preset.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-1.5">
                 <Label htmlFor="cliffDate">Cliff date</Label>
                 <Input
@@ -297,6 +376,7 @@ function CreateForm() {
                 )}
               </div>
             </div>
+            </div>
           )}
         </div>
 
@@ -308,10 +388,28 @@ function CreateForm() {
           </div>
         )}
 
+        {/* Fee estimate */}
+        {feeEstimate && (
+          <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/50 p-3 text-sm text-muted-foreground">
+            <Info className="size-4 shrink-0" />
+            Estimated transaction fee: ~{feeEstimate} XLM (includes 15% buffer)
+          </div>
+        )}
+
         {/* Submit */}
         <div className="flex items-center justify-end gap-3">
           <Button type="button" variant="ghost" asChild>
             <Link href="/app">Cancel</Link>
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={pending || estimatingFee}
+            onClick={handleEstimateFee}
+            className="gap-1.5"
+          >
+            {estimatingFee && <Loader2 className="size-4 animate-spin" />}
+            {estimatingFee ? 'Estimating…' : 'Estimate fee'}
           </Button>
           <Button type="submit" disabled={pending} className="gap-1.5">
             {pending ? 'Creating…' : 'Create stream'}

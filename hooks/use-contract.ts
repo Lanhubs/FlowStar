@@ -5,7 +5,9 @@ import {
   createStream as createStreamCall,
   withdrawFromStream,
   cancelStream as cancelStreamCall,
+  estimateCreateStreamFee,
 } from '@/lib/contract'
+import type { FeeEstimate } from '@/lib/contract'
 import { invalidateStreams } from '@/hooks/use-streams'
 import { useWallet } from '@/hooks/use-wallet'
 import type { CreateStreamInput } from '@/types/stream'
@@ -50,5 +52,17 @@ export function useContract() {
     [run],
   )
 
-  return { createStream, withdraw, cancel, pending, error }
+  const estimateFee = useCallback(
+    async (input: CreateStreamInput): Promise<FeeEstimate | null> => {
+      if (!isConnected || !address) return null
+      try {
+        return await estimateCreateStreamFee(input, address)
+      } catch {
+        return null
+      }
+    },
+    [address, isConnected],
+  )
+
+  return { createStream, withdraw, cancel, estimateFee, pending, error }
 }

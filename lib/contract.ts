@@ -30,15 +30,16 @@ async function signTx(xdrStr: string): Promise<string> {
   return _signTransaction(xdrStr)
 }
 
-/** Build, simulate, sign, and submit a contract call. Returns result ScVal. */
-async function invoke(
+const FEE_BUFFER = 1.15 // 15% above minimum to ensure inclusion
+
+/** Build and simulate a contract call, returning the prepared tx and estimated fee. */
+async function buildAndSimulate(
   method: string,
   args: xdr.ScVal[],
   signerAddress: string,
   contractAddress: string = STREAM_CONTRACT_ID,
-): Promise<xdr.ScVal> {
+) {
   const contract = new Contract(contractAddress)
-  // Always fetch a fresh account to get the latest sequence number
   const account = await server.getAccount(signerAddress)
 
   const tx = new TransactionBuilder(account, {
@@ -46,7 +47,7 @@ async function invoke(
     networkPassphrase: NETWORK.passphrase,
   })
     .addOperation(contract.call(method, ...args))
-    .setTimeout(180) // 3 minutes — enough time for two signing prompts
+    .setTimeout(180)
     .build()
 
   const sim = await server.simulateTransaction(tx)
@@ -54,7 +55,22 @@ async function invoke(
     throw new Error(`Simulation failed: ${sim.error}`)
   }
 
+  const successSim = sim as StellarRpc.Api.SimulateTransactionSuccessResponse
+  const minFee = Number(successSim.minResourceFee ?? 0)
+  const estimatedFee = Math.ceil(minFee * FEE_BUFFER)
   const prepared = StellarRpc.assembleTransaction(tx, sim).build()
+
+  return { prepared, estimatedFee, minFee }
+}
+
+/** Build, simulate, sign, and submit a contract call. Returns result ScVal. */
+async function invoke(
+  method: string,
+  args: xdr.ScVal[],
+  signerAddress: string,
+  contractAddress: string = STREAM_CONTRACT_ID,
+): Promise<xdr.ScVal> {
+  const { prepared } = await buildAndSimulate(method, args, signerAddress, contractAddress)
   const signedXdr = await signTx(prepared.toXDR('base64'))
   // Submit the signed XDR directly via the RPC JSON-RPC endpoint.
   // We bypass TransactionBuilder.fromXDR because Freighter may return a
@@ -170,6 +186,50 @@ function scValToStreamData(val: xdr.ScVal): StreamData {
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
+
+export interface FeeEstimate {
+  minFee: number
+  estimatedFee: number
+  estimatedFeeXlm: string
+}
+
+export async function estimateCreateStreamFee(
+  input: CreateStreamInput,
+  sender: string,
+): Promise<FeeEstimate> {
+  if (USE_MOCK) {
+    return { minFee: 100000, estimatedFee: 115000, estimatedFeeXlm: '0.0115' }
+  }
+
+  const params = xdr.ScVal.scvMap(
+    [
+      ['cliff_amount', nativeToScVal(input.cliffAmount, { type: 'i128' })],
+      ['cliff_time',   nativeToScVal(input.cliffTime,   { type: 'u64' })],
+      ['end_time',     nativeToScVal(input.endTime,     { type: 'u64' })],
+      ['recipient',    new Address(input.recipient).toScVal()],
+      ['start_time',   nativeToScVal(input.startTime,   { type: 'u64' })],
+      ['token',        new Address(input.token.address).toScVal()],
+      ['total_amount', nativeToScVal(input.totalAmount, { type: 'i128' })],
+    ].map(([k, v]) =>
+      new xdr.ScMapEntry({
+        key: xdr.ScVal.scvSymbol(k as string),
+        val: v as xdr.ScVal,
+      }),
+    ),
+  )
+
+  const { minFee, estimatedFee } = await buildAndSimulate(
+    'create_stream',
+    [new Address(sender).toScVal(), params],
+    sender,
+  )
+
+  return {
+    minFee,
+    estimatedFee,
+    estimatedFeeXlm: (estimatedFee / 1e7).toFixed(4),
+  }
+}
 
 export async function createStream(
   input: CreateStreamInput,

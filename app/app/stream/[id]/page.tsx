@@ -10,6 +10,7 @@ import {
   Copy,
   Check,
   ExternalLink,
+  Timer,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { RequireWallet } from '@/components/layout/require-wallet'
@@ -42,6 +43,7 @@ import {
   shortenAddress,
 } from '@/lib/stream-utils'
 import { NETWORK } from '@/lib/stellar'
+import { useAutoWithdraw } from '@/hooks/use-auto-withdraw'
 
 // ─── Address copy button ────────────────────────────────────────────────────
 
@@ -211,6 +213,109 @@ function CancelDialog({
         </div>
       </DialogContent>
     </Dialog>
+  )
+}
+
+// ─── Auto-withdraw settings ─────────────────────────────────────────────────
+
+const INTERVAL_OPTIONS = [
+  { label: 'Every 6 hours', hours: 6 },
+  { label: 'Every 12 hours', hours: 12 },
+  { label: 'Every 24 hours', hours: 24 },
+  { label: 'Every 48 hours', hours: 48 },
+] as const
+
+function AutoWithdrawSection({
+  stream,
+}: {
+  stream: import('@/types/stream').StreamData
+}) {
+  const { settings, updateSettings, lastAutoWithdraw, autoWithdrawPending } = useAutoWithdraw(stream)
+  const [minDisplay, setMinDisplay] = useState('')
+
+  return (
+    <div className="rounded-2xl border border-border bg-card p-6 space-y-4">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Timer className="size-4 text-muted-foreground" />
+          <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wide">
+            Auto-withdraw
+          </h2>
+        </div>
+        <label className="relative inline-flex cursor-pointer items-center">
+          <input
+            type="checkbox"
+            checked={settings.enabled}
+            onChange={(e) => updateSettings({ enabled: e.target.checked })}
+            className="peer sr-only"
+          />
+          <div className="h-5 w-9 rounded-full bg-muted peer-checked:bg-primary transition-colors after:absolute after:left-[2px] after:top-[2px] after:size-4 after:rounded-full after:bg-white after:transition-transform peer-checked:after:translate-x-4" />
+        </label>
+      </div>
+
+      {settings.enabled && (
+        <div className="space-y-3 pt-1">
+          <p className="text-xs text-muted-foreground">
+            Automatically withdraw available funds on an interval. The app must be open and your wallet connected.
+          </p>
+
+          <div className="space-y-1.5">
+            <Label className="text-xs">Frequency</Label>
+            <div className="flex flex-wrap gap-2">
+              {INTERVAL_OPTIONS.map((opt) => (
+                <button
+                  key={opt.hours}
+                  type="button"
+                  onClick={() => updateSettings({ intervalHours: opt.hours })}
+                  className={
+                    'rounded-full border px-3 py-1 text-xs font-medium transition-colors ' +
+                    (settings.intervalHours === opt.hours
+                      ? 'border-primary bg-primary/10 text-primary'
+                      : 'border-border text-muted-foreground hover:border-primary hover:text-primary')
+                  }
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="min-amount" className="text-xs">
+              Minimum amount ({stream.token.symbol})
+            </Label>
+            <Input
+              id="min-amount"
+              type="number"
+              min="0"
+              step="any"
+              placeholder="0 (no minimum)"
+              value={minDisplay}
+              onChange={(e) => {
+                setMinDisplay(e.target.value)
+                const raw = e.target.value
+                  ? parseTokenAmount(e.target.value, stream.token.decimals).toString()
+                  : '0'
+                updateSettings({ minAmountRaw: raw })
+              }}
+              className="max-w-48"
+            />
+            <p className="text-xs text-muted-foreground">
+              Skip auto-withdraw if the available amount is below this threshold.
+            </p>
+          </div>
+
+          {autoWithdrawPending && (
+            <p className="text-xs text-primary">Auto-withdrawing...</p>
+          )}
+          {lastAutoWithdraw && (
+            <p className="text-xs text-muted-foreground">
+              Last auto-withdrawal: {new Date(lastAutoWithdraw).toLocaleTimeString()}
+            </p>
+          )}
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -434,6 +539,11 @@ function StreamDetail({ id }: { id: string }) {
           <span className="capitalize">{NETWORK.name}</span>
         </DetailRow>
       </div>
+
+      {/* Auto-withdraw (recipients only, active streams) */}
+      {isRecipient && !stream.cancelled && status !== 'completed' && (
+        <AutoWithdrawSection stream={stream} />
+      )}
 
       {/* Dialogs */}
       <WithdrawDialog
