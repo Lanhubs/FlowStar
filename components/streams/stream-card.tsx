@@ -7,6 +7,7 @@ import { useWallet } from '@/hooks/use-wallet'
 import {
   getStreamProgress,
   getStreamStatus,
+  formatTokenAmount,
   shortenAddress,
 } from '@/lib/stream-utils'
 import { ProgressBar } from '@/components/ui/progress-bar'
@@ -27,11 +28,15 @@ export function StreamCard({ stream }: { stream: StreamData }) {
 
   const isOutgoing = address === stream.sender
   const counterparty = isOutgoing ? stream.recipient : stream.sender
+  const direction = isOutgoing ? 'Sending' : 'Receiving'
+  const displayAmount = formatTokenAmount(stream.depositedAmount, stream.token.decimals, 2)
+  const ariaLabel = `${direction} ${displayAmount} ${stream.token.symbol}, ${status}, ${(progress * 100).toFixed(0)}% unlocked`
 
   return (
     <Link
       href={`/app/stream/${stream.id}`}
       className="group block rounded-2xl border border-border bg-card p-5 transition-colors hover:border-primary/40"
+      aria-label={ariaLabel}
     >
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-center gap-3">

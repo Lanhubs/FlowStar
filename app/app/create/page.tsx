@@ -19,6 +19,7 @@ import {
 import { useContract } from '@/hooks/use-contract'
 import { KNOWN_TOKENS } from '@/lib/stellar'
 import { parseTokenAmount } from '@/lib/stream-utils'
+import { StreamPreview } from '@/components/streams/stream-preview'
 import type { TokenInfo } from '@/types/stream'
 
 const TOKENS: TokenInfo[] = KNOWN_TOKENS.map((t) => ({ ...t }))
@@ -167,7 +168,7 @@ function CreateForm() {
   }
 
   return (
-    <div className="mx-auto max-w-xl">
+    <div className="mx-auto max-w-4xl">
       {/* Back */}
       <Link
         href="/app"
@@ -184,7 +185,8 @@ function CreateForm() {
         </p>
       </div>
 
-      <form onSubmit={handleSubmit} className="mt-8 space-y-6">
+      <div className="mt-8 grid gap-8 lg:grid-cols-[1fr_320px]">
+      <form onSubmit={handleSubmit} className="space-y-6">
         {/* Token + Amount */}
         <div className="rounded-2xl border border-border bg-card p-5 space-y-4">
           <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wide">
@@ -417,6 +419,20 @@ function CreateForm() {
           </Button>
         </div>
       </form>
+
+      {/* Live preview sidebar */}
+      <aside className="lg:sticky lg:top-24 lg:self-start">
+        <StreamPreview
+          amount={form.amount}
+          token={selectedToken}
+          startDate={form.startDate}
+          endDate={form.endDate}
+          hasCliff={form.hasCliff}
+          cliffDate={form.cliffDate}
+          cliffAmount={form.cliffAmount}
+        />
+      </aside>
+      </div>
     </div>
   )
 }

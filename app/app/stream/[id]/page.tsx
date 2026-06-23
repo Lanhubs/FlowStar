@@ -44,6 +44,7 @@ import {
 } from '@/lib/stream-utils'
 import { NETWORK } from '@/lib/stellar'
 import { useAutoWithdraw } from '@/hooks/use-auto-withdraw'
+import { UnlockChart } from '@/components/streams/unlock-chart'
 
 // ─── Address copy button ────────────────────────────────────────────────────
 
@@ -248,6 +249,7 @@ function AutoWithdrawSection({
             checked={settings.enabled}
             onChange={(e) => updateSettings({ enabled: e.target.checked })}
             className="peer sr-only"
+            aria-label="Enable auto-withdraw"
           />
           <div className="h-5 w-9 rounded-full bg-muted peer-checked:bg-primary transition-colors after:absolute after:left-[2px] after:top-[2px] after:size-4 after:rounded-full after:bg-white after:transition-transform peer-checked:after:translate-x-4" />
         </label>
@@ -486,6 +488,11 @@ function StreamDetail({ id }: { id: string }) {
             )}
           </div>
         )}
+      </div>
+
+      {/* Unlock chart */}
+      <div className="rounded-2xl border border-border bg-card p-6">
+        <UnlockChart stream={stream} nowSeconds={now} />
       </div>
 
       {/* Details */}
