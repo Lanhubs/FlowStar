@@ -1,5 +1,6 @@
 import type { Metadata, ReactNode } from 'react'
 import { Navbar } from '@/components/layout/navbar'
+import { MockModeBanner } from '@/components/layout/mock-mode-banner'
 
 export const metadata: Metadata = {
   title: 'Dashboard',
@@ -22,6 +23,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
       >
         {children}
       </main>
+      <MockModeBanner />
     </div>
   )
 }
