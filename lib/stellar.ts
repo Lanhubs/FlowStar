@@ -31,7 +31,7 @@ if (IS_MOCK_MODE && process.env.NODE_ENV !== 'production') {
 export const server = new rpc.Server(NETWORK.rpcUrl, { allowHttp: false })
 
 /** Common tokens on testnet. */
-export const KNOWN_TOKENS = [
+export const KNOWN_TOKENS: readonly { address: string; symbol: string; decimals: number }[] = [
   {
     address: 'CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC',
     symbol: 'XLM',
@@ -47,4 +47,32 @@ export const KNOWN_TOKENS = [
     symbol: 'EURC',
     decimals: 7,
   },
-] as const
+]
+
+const CUSTOM_TOKENS_KEY = 'flowstar:custom-tokens'
+
+export function getCustomTokens(): { address: string; symbol: string; decimals: number }[] {
+  if (typeof window === 'undefined') return []
+  try {
+    const raw = localStorage.getItem(CUSTOM_TOKENS_KEY)
+    return raw ? JSON.parse(raw) : []
+  } catch {
+    return []
+  }
+}
+
+export function saveCustomToken(token: { address: string; symbol: string; decimals: number }) {
+  const existing = getCustomTokens()
+  if (existing.some((t) => t.address === token.address)) return
+  const updated = [token, ...existing].slice(0, 10)
+  localStorage.setItem(CUSTOM_TOKENS_KEY, JSON.stringify(updated))
+}
+
+export function removeCustomToken(address: string) {
+  const updated = getCustomTokens().filter((t) => t.address !== address)
+  localStorage.setItem(CUSTOM_TOKENS_KEY, JSON.stringify(updated))
+}
+
+export function getAllTokens(): { address: string; symbol: string; decimals: number }[] {
+  return [...KNOWN_TOKENS, ...getCustomTokens()]
+}

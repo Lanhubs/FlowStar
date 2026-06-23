@@ -289,6 +289,15 @@ impl StreamingContract {
             .unwrap_or(Vec::new(&env))
     }
 
+    // ── Write: Bump TTL ──────────────────────────────────────────────────────
+
+    /// Extend the TTL of a stream's persistent storage without modifying data.
+    /// Anyone can call this to keep a long-running stream alive.
+    pub fn bump_stream(env: Env, stream_id: u64) {
+        Self::load_stream(&env, stream_id);
+        Self::extend_stream_ttl(&env, stream_id);
+    }
+
     // ── Internal helpers ─────────────────────────────────────────────────────
 
     fn load_stream(env: &Env, id: u64) -> Stream {

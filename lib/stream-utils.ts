@@ -95,6 +95,68 @@ export function parseTokenAmount(value: string, decimals: number): bigint {
   return BigInt(whole || '0') * 10n ** BigInt(decimals) + BigInt(fracPadded || '0')
 }
 
+export interface FormattedRate {
+  perSecond: string
+  perMinute: string
+  perHour: string
+  perDay: string
+  perMonth: string
+  perYear: string
+  best: string
+  bestUnit: string
+}
+
+export function formatRate(
+  amountPerSecond: bigint,
+  decimals: number,
+  symbol: string,
+): FormattedRate {
+  const perSecond = Number(amountPerSecond) / 10 ** decimals
+
+  const rates = {
+    perSecond,
+    perMinute: perSecond * 60,
+    perHour: perSecond * 3600,
+    perDay: perSecond * 86400,
+    perMonth: perSecond * 2_592_000,
+    perYear: perSecond * 31_536_000,
+  }
+
+  const fmt = (n: number) =>
+    n >= 1
+      ? n.toLocaleString('en-US', { maximumFractionDigits: 2 })
+      : n.toPrecision(4).replace(/\.?0+$/, '')
+
+  const units: { key: keyof typeof rates; label: string }[] = [
+    { key: 'perMinute', label: '/min' },
+    { key: 'perHour', label: '/hr' },
+    { key: 'perDay', label: '/day' },
+    { key: 'perMonth', label: '/mo' },
+    { key: 'perYear', label: '/yr' },
+  ]
+
+  let bestUnit = '/day'
+  let bestValue = rates.perDay
+  for (const u of units) {
+    if (rates[u.key] >= 0.01) {
+      bestUnit = u.label
+      bestValue = rates[u.key]
+      break
+    }
+  }
+
+  return {
+    perSecond: `${fmt(rates.perSecond)} ${symbol}/s`,
+    perMinute: `${fmt(rates.perMinute)} ${symbol}/min`,
+    perHour: `${fmt(rates.perHour)} ${symbol}/hr`,
+    perDay: `${fmt(rates.perDay)} ${symbol}/day`,
+    perMonth: `${fmt(rates.perMonth)} ${symbol}/mo`,
+    perYear: `${fmt(rates.perYear)} ${symbol}/yr`,
+    best: `${fmt(bestValue)} ${symbol}${bestUnit}`,
+    bestUnit,
+  }
+}
+
 export function shortenAddress(address: string, chars = 4): string {
   if (address.length <= chars * 2 + 2) return address
   return `${address.slice(0, chars + 1)}…${address.slice(-chars)}`
