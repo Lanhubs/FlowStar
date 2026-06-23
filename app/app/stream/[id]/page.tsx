@@ -11,6 +11,7 @@ import {
   Check,
   ExternalLink,
   Timer,
+  AlertTriangle,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { RequireWallet } from '@/components/layout/require-wallet'
@@ -41,10 +42,12 @@ import {
   formatDateTime,
   parseTokenAmount,
   shortenAddress,
+  formatRate,
 } from '@/lib/stream-utils'
 import { NETWORK } from '@/lib/stellar'
 import { useAutoWithdraw } from '@/hooks/use-auto-withdraw'
 import { UnlockChart } from '@/components/streams/unlock-chart'
+import { bumpStreamTtl } from '@/lib/contract'
 
 // ─── Address copy button ────────────────────────────────────────────────────
 
@@ -321,6 +324,99 @@ function AutoWithdrawSection({
   )
 }
 
+// ─── TTL warning ───────────────────────────────────────────────────────────
+
+const TTL_DAYS = 30
+const WARN_DAYS = 7
+
+function estimateDaysSinceLastWrite(stream: import('@/types/stream').StreamData, nowSeconds: number): number {
+  const now = BigInt(nowSeconds)
+  const lastWrite = stream.withdrawnAmount > 0n
+    ? now
+    : stream.cancelled
+      ? now
+      : stream.startTime
+  return Number(now - lastWrite) / 86400
+}
+
+function TtlWarning({ stream, nowSeconds }: { stream: import('@/types/stream').StreamData; nowSeconds: number }) {
+  const { address } = useWallet()
+  const [bumping, setBumping] = useState(false)
+  const [bumped, setBumped] = useState(false)
+
+  const daysSinceWrite = estimateDaysSinceLastWrite(stream, nowSeconds)
+  const estimatedDaysLeft = TTL_DAYS - daysSinceWrite
+
+  if (bumped || estimatedDaysLeft > WARN_DAYS || estimatedDaysLeft < 0) return null
+
+  async function handleBump() {
+    if (!address) return
+    setBumping(true)
+    try {
+      await bumpStreamTtl(stream.id, address)
+      setBumped(true)
+      toast.success('Storage TTL extended by 30 days')
+    } catch {
+      toast.error('Failed to extend TTL')
+    } finally {
+      setBumping(false)
+    }
+  }
+
+  return (
+    <div className="flex items-start gap-3 rounded-2xl border border-yellow-500/40 bg-yellow-500/10 p-4">
+      <AlertTriangle className="mt-0.5 size-5 shrink-0 text-yellow-500" />
+      <div className="flex-1 space-y-1">
+        <p className="text-sm font-medium text-yellow-700 dark:text-yellow-400">
+          Storage may be expiring soon
+        </p>
+        <p className="text-xs text-yellow-600 dark:text-yellow-400/80">
+          This stream&apos;s on-chain data may expire in ~{Math.max(0, Math.floor(estimatedDaysLeft))} day{Math.floor(estimatedDaysLeft) !== 1 ? 's' : ''}.
+          Extend the TTL to prevent data loss and keep the stream active.
+        </p>
+        {address && (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleBump}
+            disabled={bumping}
+            className="mt-2 border-yellow-500/40 text-yellow-700 hover:bg-yellow-500/10 dark:text-yellow-400"
+          >
+            {bumping ? 'Extending…' : 'Extend TTL'}
+          </Button>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ─── Rate display ──────────────────────────────────────────────────────────
+
+function RateDisplay({ stream }: { stream: import('@/types/stream').StreamData }) {
+  const [expanded, setExpanded] = useState(false)
+  const rate = formatRate(stream.amountPerSecond, stream.token.decimals, stream.token.symbol)
+
+  return (
+    <div className="text-right">
+      <button
+        onClick={() => setExpanded((v) => !v)}
+        className="font-mono text-sm font-medium text-primary hover:underline"
+      >
+        {rate.best}
+      </button>
+      {expanded && (
+        <div className="mt-1 space-y-0.5 text-xs text-muted-foreground font-mono">
+          <p>{rate.perMinute}</p>
+          <p>{rate.perHour}</p>
+          <p>{rate.perDay}</p>
+          <p>{rate.perMonth}</p>
+          <p>{rate.perYear}</p>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ─── Main page ───────────────────────────────────────────────────────────────
 
 function StreamDetail({ id }: { id: string }) {
@@ -490,6 +586,11 @@ function StreamDetail({ id }: { id: string }) {
         )}
       </div>
 
+      {/* TTL warning */}
+      {!stream.cancelled && status !== 'completed' && (
+        <TtlWarning stream={stream} nowSeconds={now} />
+      )}
+
       {/* Unlock chart */}
       <div className="rounded-2xl border border-border bg-card p-6">
         <UnlockChart stream={stream} nowSeconds={now} />
@@ -521,10 +622,7 @@ function StreamDetail({ id }: { id: string }) {
           </span>
         </DetailRow>
         <DetailRow label="Rate">
-          <span className="font-mono">
-            {formatTokenAmount(stream.amountPerSecond, stream.token.decimals, 6)}{' '}
-            {stream.token.symbol}/s
-          </span>
+          <RateDisplay stream={stream} />
         </DetailRow>
         <DetailRow label="Start">
           {formatDateTime(stream.startTime)}

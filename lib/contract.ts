@@ -329,6 +329,57 @@ export async function cancelStream(id: string): Promise<void> {
     stream.sender,
   )}
 
+export async function getTokenMetadata(tokenAddress: string): Promise<TokenInfo | null> {
+  try {
+    const contract = new Contract(tokenAddress)
+    const dummyAccount = await server.getAccount(
+      'GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN',
+    )
+
+    const buildSimTx = (method: string) => {
+      const tx = new TransactionBuilder(dummyAccount, {
+        fee: '100',
+        networkPassphrase: NETWORK.passphrase,
+      })
+        .addOperation(contract.call(method))
+        .setTimeout(10)
+        .build()
+      return server.simulateTransaction(tx)
+    }
+
+    const [symSim, decSim] = await Promise.all([
+      buildSimTx('symbol'),
+      buildSimTx('decimals'),
+    ])
+
+    if (StellarRpc.Api.isSimulationError(symSim) || StellarRpc.Api.isSimulationError(decSim)) {
+      return null
+    }
+
+    const symResult = (symSim as StellarRpc.Api.SimulateTransactionSuccessResponse).result?.retval
+    const decResult = (decSim as StellarRpc.Api.SimulateTransactionSuccessResponse).result?.retval
+
+    if (!symResult || !decResult) return null
+
+    const symbol = scValToNative(symResult) as string
+    const decimals = Number(scValToNative(decResult))
+
+    return { address: tokenAddress, symbol, decimals }
+  } catch {
+    return null
+  }
+}
+
+export async function bumpStreamTtl(id: string, signerAddress: string): Promise<void> {
+  if (USE_MOCK) return
+
+  await invoke(
+    'bump_stream',
+    [nativeToScVal(BigInt(id), { type: 'u64' })],
+    signerAddress,
+  )
+}
+
 export async function fetchStream(id: string): Promise<StreamData | null> {
   if (USE_MOCK) return mockStore.getById(id) ?? null
 

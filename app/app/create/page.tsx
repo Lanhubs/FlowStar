@@ -17,12 +17,13 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { useContract } from '@/hooks/use-contract'
-import { KNOWN_TOKENS } from '@/lib/stellar'
+import { getAllTokens, saveCustomToken } from '@/lib/stellar'
+import { getTokenMetadata } from '@/lib/contract'
 import { parseTokenAmount } from '@/lib/stream-utils'
 import { StreamPreview } from '@/components/streams/stream-preview'
 import type { TokenInfo } from '@/types/stream'
 
-const TOKENS: TokenInfo[] = KNOWN_TOKENS.map((t) => ({ ...t }))
+const CUSTOM_VALUE = '__custom__'
 
 function toUnixSeconds(localDatetimeValue: string): bigint {
   return BigInt(Math.floor(new Date(localDatetimeValue).getTime() / 1000))
@@ -69,12 +70,19 @@ function CreateForm() {
   const [feeEstimate, setFeeEstimate] = useState<string | null>(null)
   const [estimatingFee, setEstimatingFee] = useState(false)
 
-  const defaultStart = localDatetimeMin(60) // 1 min from now
-  const defaultEnd = localDatetimeMin(60 + 30 * 24 * 3600) // +30 days
+  const [tokens, setTokens] = useState<TokenInfo[]>(() => getAllTokens().map((t) => ({ ...t })))
+  const [isCustom, setIsCustom] = useState(false)
+  const [customAddress, setCustomAddress] = useState('')
+  const [customLoading, setCustomLoading] = useState(false)
+  const [customError, setCustomError] = useState<string | null>(null)
+  const [customToken, setCustomToken] = useState<TokenInfo | null>(null)
+
+  const defaultStart = localDatetimeMin(60)
+  const defaultEnd = localDatetimeMin(60 + 30 * 24 * 3600)
 
   const [form, setForm] = useState<FormState>({
     recipient: '',
-    tokenAddress: TOKENS[0].address,
+    tokenAddress: tokens[0]?.address ?? '',
     amount: '',
     startDate: defaultStart,
     endDate: defaultEnd,
@@ -85,7 +93,34 @@ function CreateForm() {
 
   const [errors, setErrors] = useState<Partial<Record<keyof FormState, string>>>({})
 
-  const selectedToken = TOKENS.find((t) => t.address === form.tokenAddress) ?? TOKENS[0]
+  const selectedToken = isCustom && customToken
+    ? customToken
+    : tokens.find((t) => t.address === form.tokenAddress) ?? tokens[0]
+
+  async function handleCustomTokenLookup() {
+    if (!customAddress || customAddress.length < 56) {
+      setCustomError('Enter a valid Stellar contract address (56 chars, starts with C)')
+      return
+    }
+    setCustomLoading(true)
+    setCustomError(null)
+    setCustomToken(null)
+    try {
+      const meta = await getTokenMetadata(customAddress)
+      if (!meta) {
+        setCustomError('Could not fetch token metadata. Verify this is a valid SEP-41 token contract.')
+        return
+      }
+      setCustomToken(meta)
+      saveCustomToken(meta)
+      setTokens(getAllTokens().map((t) => ({ ...t })))
+      set('tokenAddress', meta.address)
+    } catch {
+      setCustomError('Failed to query token contract')
+    } finally {
+      setCustomLoading(false)
+    }
+  }
 
   function set<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((prev) => ({ ...prev, [key]: value }))
@@ -100,6 +135,9 @@ function CreateForm() {
     }
     if (!form.amount || isNaN(Number(form.amount)) || Number(form.amount) <= 0) {
       newErrors.amount = 'Enter a valid amount greater than 0'
+    }
+    if (isCustom && !customToken) {
+      newErrors.tokenAddress = 'Look up a valid custom token first'
     }
     const start = new Date(form.startDate).getTime()
     const end = new Date(form.endDate).getTime()
@@ -196,21 +234,66 @@ function CreateForm() {
           <div className="space-y-1.5">
             <Label htmlFor="token">Token</Label>
             <Select
-              value={form.tokenAddress}
-              onValueChange={(v) => set('tokenAddress', v)}
+              value={isCustom ? CUSTOM_VALUE : form.tokenAddress}
+              onValueChange={(v) => {
+                if (v === CUSTOM_VALUE) {
+                  setIsCustom(true)
+                } else {
+                  setIsCustom(false)
+                  setCustomToken(null)
+                  setCustomError(null)
+                  set('tokenAddress', v)
+                }
+              }}
             >
               <SelectTrigger id="token" className="w-full">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {TOKENS.map((t) => (
+                {tokens.map((t) => (
                   <SelectItem key={t.address} value={t.address}>
                     {t.symbol}
                   </SelectItem>
                 ))}
+                <SelectItem value={CUSTOM_VALUE}>Custom token…</SelectItem>
               </SelectContent>
             </Select>
           </div>
+
+          {isCustom && (
+            <div className="space-y-2 rounded-lg border border-border bg-muted/30 p-3">
+              <Label htmlFor="customToken" className="text-xs">Token contract address</Label>
+              <div className="flex gap-2">
+                <Input
+                  id="customToken"
+                  placeholder="CABC…"
+                  value={customAddress}
+                  onChange={(e) => {
+                    setCustomAddress(e.target.value)
+                    setCustomError(null)
+                  }}
+                  className="font-mono text-xs"
+                />
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  disabled={customLoading}
+                  onClick={handleCustomTokenLookup}
+                >
+                  {customLoading ? <Loader2 className="size-4 animate-spin" /> : 'Lookup'}
+                </Button>
+              </div>
+              {customError && (
+                <p className="text-xs text-destructive">{customError}</p>
+              )}
+              {customToken && (
+                <p className="text-xs text-primary">
+                  Found: {customToken.symbol} ({customToken.decimals} decimals)
+                </p>
+              )}
+            </div>
+          )}
 
           <div className="space-y-1.5">
             <Label htmlFor="amount">Total amount ({selectedToken.symbol})</Label>

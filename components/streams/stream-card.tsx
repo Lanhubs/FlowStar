@@ -9,6 +9,7 @@ import {
   getStreamStatus,
   formatTokenAmount,
   shortenAddress,
+  formatRate,
 } from '@/lib/stream-utils'
 import { ProgressBar } from '@/components/ui/progress-bar'
 import { TokenAmount } from '@/components/ui/token-amount'
@@ -26,6 +27,7 @@ export function StreamCard({ stream }: { stream: StreamData }) {
       ? Number((stream.withdrawnAmount * 10000n) / stream.depositedAmount) / 10000
       : 0
 
+  const rate = formatRate(stream.amountPerSecond, stream.token.decimals, stream.token.symbol)
   const isOutgoing = address === stream.sender
   const counterparty = isOutgoing ? stream.recipient : stream.sender
   const direction = isOutgoing ? 'Sending' : 'Receiving'
@@ -95,6 +97,10 @@ export function StreamCard({ stream }: { stream: StreamData }) {
           </p>
         </div>
       </div>
+
+      {(status === 'streaming' || status === 'scheduled') && (
+        <p className="mt-3 text-xs font-mono text-muted-foreground">{rate.best}</p>
+      )}
 
       <div className="mt-4">
         <ProgressBar

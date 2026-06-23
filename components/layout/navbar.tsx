@@ -6,6 +6,7 @@ import { Plus } from 'lucide-react'
 import { Brand } from '@/components/brand'
 import { Button } from '@/components/ui/button'
 import { ConnectWalletButton } from '@/components/layout/connect-wallet-button'
+import { NotificationBell } from '@/components/layout/notification-bell'
 import { cn } from '@/lib/utils'
 
 const NAV_LINKS = [
@@ -51,6 +52,7 @@ export function Navbar() {
               <span className="hidden sm:inline">New stream</span>
             </Link>
           </Button>
+          <NotificationBell />
           <ConnectWalletButton />
         </div>
       </div>
