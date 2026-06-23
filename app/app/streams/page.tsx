@@ -1,8 +1,10 @@
 'use client'
 
 import { useState } from 'react'
-import { Search } from 'lucide-react'
+import { Search, Download } from 'lucide-react'
 import { RequireWallet } from '@/components/layout/require-wallet'
+import { Button } from '@/components/ui/button'
+import { streamsToCSV, downloadCSV } from '@/lib/export'
 import { StreamCard } from '@/components/streams/stream-card'
 import { EmptyStreams } from '@/components/streams/empty-state'
 import { StreamStatusBadge } from '@/components/streams/stream-status-badge'
@@ -41,11 +43,26 @@ function StreamsPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Streams</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          All streams you've sent or received.
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Streams</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            All streams you've sent or received.
+          </p>
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          className="gap-1.5"
+          disabled={all.length === 0}
+          onClick={() => {
+            const csv = streamsToCSV(all, now)
+            downloadCSV(csv, `flowstar-streams-${new Date().toISOString().slice(0, 10)}.csv`)
+          }}
+        >
+          <Download className="size-4" />
+          Download CSV
+        </Button>
       </div>
 
       {/* Filters */}
