@@ -7,14 +7,15 @@ import {
   xdr,
   rpc as StellarRpc,
 } from '@stellar/stellar-sdk'
-import { server, NETWORK, STREAM_CONTRACT_ID } from '@/lib/stellar'
+import { server, NETWORK, STREAM_CONTRACT_ID, IS_MOCK_MODE } from '@/lib/stellar'
 import { KNOWN_TOKENS } from '@/lib/stellar'
 import { mockStore } from '@/lib/mock-data'
 import type { CreateStreamInput, StreamData, TokenInfo } from '@/types/stream'
 
 // ─── Toggle ───────────────────────────────────────────────────────────────────
-// Flip to false once the contract is deployed and wallet signing is wired up.
-const USE_MOCK = !STREAM_CONTRACT_ID
+// Driven by NEXT_PUBLIC_STREAM_CONTRACT_ID: mock mode is on whenever no contract
+// ID is configured, and switches to live calls once one is set.
+const USE_MOCK = IS_MOCK_MODE
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
