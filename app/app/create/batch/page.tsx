@@ -249,7 +249,7 @@ export default function BatchCreatePage() {
                 <Label htmlFor="token">Token</Label>
                 <Select
                   value={selectedToken}
-                  onValueChange={(value) => setSelectedToken(value)}
+                  onValueChange={(value) => { if (value) setSelectedToken(value) }}
                 >
                   <SelectTrigger id="token" className="w-full">
                     <SelectValue />
