@@ -73,6 +73,12 @@ export function removeCustomToken(address: string) {
   localStorage.setItem(CUSTOM_TOKENS_KEY, JSON.stringify(updated))
 }
 
+const EXPLORER_NETWORK = NETWORK.name === 'testnet' ? 'testnet' : 'public'
+
+export function explorerUrl(type: 'account' | 'contract' | 'tx', id: string): string {
+  return `https://stellar.expert/explorer/${EXPLORER_NETWORK}/${type}/${id}`
+}
+
 export function getAllTokens(): { address: string; symbol: string; decimals: number }[] {
   return [...KNOWN_TOKENS, ...getCustomTokens()]
 }

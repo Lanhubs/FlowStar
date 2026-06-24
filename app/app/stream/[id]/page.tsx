@@ -44,14 +44,14 @@ import {
   shortenAddress,
   formatRate,
 } from '@/lib/stream-utils'
-import { NETWORK } from '@/lib/stellar'
+import { NETWORK, explorerUrl } from '@/lib/stellar'
 import { useAutoWithdraw } from '@/hooks/use-auto-withdraw'
 import { UnlockChart } from '@/components/streams/unlock-chart'
 import { bumpStreamTtl } from '@/lib/contract'
 
 // ─── Address copy button ────────────────────────────────────────────────────
 
-function CopyableAddress({ address }: { address: string }) {
+function CopyableAddress({ address, href }: { address: string; href?: string }) {
   const [copied, setCopied] = useState(false)
   function copy() {
     navigator.clipboard.writeText(address)
@@ -59,17 +59,30 @@ function CopyableAddress({ address }: { address: string }) {
     setTimeout(() => setCopied(false), 1500)
   }
   return (
-    <button
-      onClick={copy}
-      className="group inline-flex items-center gap-1.5 font-mono text-sm hover:text-primary transition-colors"
-    >
-      <span className="truncate max-w-[200px] sm:max-w-xs">{shortenAddress(address, 6)}</span>
-      {copied ? (
-        <Check className="size-3.5 text-primary shrink-0" />
-      ) : (
-        <Copy className="size-3.5 text-muted-foreground shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
+    <span className="inline-flex items-center gap-1">
+      <button
+        onClick={copy}
+        className="group inline-flex items-center gap-1.5 font-mono text-sm hover:text-primary transition-colors"
+      >
+        <span className="truncate max-w-[200px] sm:max-w-xs">{shortenAddress(address, 6)}</span>
+        {copied ? (
+          <Check className="size-3.5 text-primary shrink-0" />
+        ) : (
+          <Copy className="size-3.5 text-muted-foreground shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
+        )}
+      </button>
+      {href && (
+        <a
+          href={href}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-muted-foreground hover:text-primary transition-colors"
+          aria-label="View on Stellar Expert"
+        >
+          <ExternalLink className="size-3.5" />
+        </a>
       )}
-    </button>
+    </span>
   )
 }
 
@@ -108,9 +121,15 @@ function WithdrawDialog({
 
   async function handleWithdraw() {
     try {
-      await withdraw(streamId, parsed)
+      const hash = await withdraw(streamId, parsed)
       toast.success('Withdrawal successful', {
         description: `${formatTokenAmount(parsed, token.decimals, 4)} ${token.symbol} sent to your wallet.`,
+        ...(hash && {
+          action: {
+            label: 'View transaction',
+            onClick: () => window.open(explorerUrl('tx', hash), '_blank'),
+          },
+        }),
       })
       onClose()
       setInputAmount('')
@@ -187,9 +206,15 @@ function CancelDialog({
 
   async function handleCancel() {
     try {
-      await cancel(streamId)
+      const hash = await cancel(streamId)
       toast.success('Stream cancelled', {
         description: 'Unlocked funds sent to recipient. Remainder returned to you.',
+        ...(hash && {
+          action: {
+            label: 'View transaction',
+            onClick: () => window.open(explorerUrl('tx', hash), '_blank'),
+          },
+        }),
       })
       onClose()
       router.push('/app')
@@ -602,13 +627,24 @@ function StreamDetail({ id }: { id: string }) {
           Details
         </h2>
         <DetailRow label="Sender">
-          <CopyableAddress address={stream.sender} />
+          <CopyableAddress address={stream.sender} href={explorerUrl('account', stream.sender)} />
         </DetailRow>
         <DetailRow label="Recipient">
-          <CopyableAddress address={stream.recipient} />
+          <CopyableAddress address={stream.recipient} href={explorerUrl('account', stream.recipient)} />
         </DetailRow>
         <DetailRow label="Token">
-          <span className="font-mono">{stream.token.symbol}</span>
+          <span className="inline-flex items-center gap-1.5">
+            <span className="font-mono">{stream.token.symbol}</span>
+            <a
+              href={explorerUrl('contract', stream.token.address)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-muted-foreground hover:text-primary transition-colors"
+              aria-label="View token contract on Stellar Expert"
+            >
+              <ExternalLink className="size-3.5" />
+            </a>
+          </span>
         </DetailRow>
         <DetailRow label="Total deposited">
           <TokenAmount amount={stream.depositedAmount} token={stream.token} maxFractionDigits={4} />
