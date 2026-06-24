@@ -1,4 +1,5 @@
-import type { Metadata, ReactNode } from 'react'
+import type { ReactNode } from 'react'
+import type { Metadata } from 'next'
 import { Navbar } from '@/components/layout/navbar'
 import { MockModeBanner } from '@/components/layout/mock-mode-banner'
 

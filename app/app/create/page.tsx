@@ -236,6 +236,7 @@ function CreateForm() {
             <Select
               value={isCustom ? CUSTOM_VALUE : form.tokenAddress}
               onValueChange={(v) => {
+                if (!v) return
                 if (v === CUSTOM_VALUE) {
                   setIsCustom(true)
                 } else {

@@ -72,7 +72,7 @@ async function invoke(
   contractAddress: string = STREAM_CONTRACT_ID,
 ): Promise<string> {
   const { prepared } = await buildAndSimulate(method, args, signerAddress, contractAddress)
-  const signedXdr = await signTx(prepared.toXDR('base64'))
+  const signedXdr = await signTx(prepared.toXDR())
   // Submit the signed XDR directly via the RPC JSON-RPC endpoint.
   // We bypass TransactionBuilder.fromXDR because Freighter may return a
   // FeeBumpTransaction envelope (type 4) which fromXDR can't handle.
