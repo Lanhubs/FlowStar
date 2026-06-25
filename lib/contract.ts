@@ -367,6 +367,35 @@ export async function getTokenMetadata(tokenAddress: string): Promise<TokenInfo 
   }
 }
 
+export async function getTokenBalance(
+  tokenAddress: string,
+  accountAddress: string,
+): Promise<bigint> {
+  if (USE_MOCK) return BigInt(1_000_000_0000000) // 1,000,000 units mock
+
+  try {
+    const contract = new Contract(tokenAddress)
+    const account = await server.getAccount(
+      'GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN',
+    )
+    const tx = new TransactionBuilder(account, {
+      fee: '100',
+      networkPassphrase: NETWORK.passphrase,
+    })
+      .addOperation(contract.call('balance', new Address(accountAddress).toScVal()))
+      .setTimeout(10)
+      .build()
+
+    const sim = await server.simulateTransaction(tx)
+    if (StellarRpc.Api.isSimulationError(sim)) return 0n
+    const retval = (sim as StellarRpc.Api.SimulateTransactionSuccessResponse).result?.retval
+    if (!retval) return 0n
+    return BigInt(scValToNative(retval) as string | number)
+  } catch {
+    return 0n
+  }
+}
+
 export async function bumpStreamTtl(id: string, signerAddress: string): Promise<void> {
   if (USE_MOCK) return
 

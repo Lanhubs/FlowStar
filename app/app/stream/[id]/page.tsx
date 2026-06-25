@@ -12,9 +12,11 @@ import {
   ExternalLink,
   Timer,
   AlertTriangle,
+  Link as LinkIcon,
+  Wallet,
 } from 'lucide-react'
 import { toast } from 'sonner'
-import { RequireWallet } from '@/components/layout/require-wallet'
+import { ConnectWalletButton } from '@/components/layout/connect-wallet-button'
 import { StreamStatusBadge } from '@/components/streams/stream-status-badge'
 import { ProgressBar } from '@/components/ui/progress-bar'
 import { TokenAmount } from '@/components/ui/token-amount'
@@ -444,9 +446,41 @@ function RateDisplay({ stream }: { stream: import('@/types/stream').StreamData }
 
 // ─── Main page ───────────────────────────────────────────────────────────────
 
+function CopyLinkButton() {
+  const [copied, setCopied] = useState(false)
+  function copy() {
+    navigator.clipboard.writeText(window.location.href)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1500)
+    toast.success('Link copied to clipboard')
+  }
+  return (
+    <button
+      onClick={copy}
+      className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+      aria-label="Copy stream link"
+    >
+      {copied ? <Check className="size-4" /> : <LinkIcon className="size-4" />}
+      {copied ? 'Copied!' : 'Copy link'}
+    </button>
+  )
+}
+
+function ConnectPrompt() {
+  return (
+    <div className="flex items-center gap-3 rounded-2xl border border-border bg-card p-4">
+      <Wallet className="size-5 shrink-0 text-muted-foreground" />
+      <p className="text-sm text-muted-foreground flex-1">
+        Connect your wallet to withdraw, cancel, or interact with this stream.
+      </p>
+      <ConnectWalletButton />
+    </div>
+  )
+}
+
 function StreamDetail({ id }: { id: string }) {
   const { stream, loading } = useStream(id)
-  const { address } = useWallet()
+  const { address, isConnected } = useWallet()
   const now = useNow(1000)
   const [withdrawOpen, setWithdrawOpen] = useState(false)
   const [cancelOpen, setCancelOpen] = useState(false)
@@ -489,14 +523,20 @@ function StreamDetail({ id }: { id: string }) {
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
-      {/* Back */}
-      <Link
-        href="/app"
-        className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
-      >
-        <ArrowLeft className="size-4" />
-        Dashboard
-      </Link>
+      {/* Back + Copy link */}
+      <div className="flex items-center justify-between">
+        <Link
+          href="/app"
+          className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
+        >
+          <ArrowLeft className="size-4" />
+          Dashboard
+        </Link>
+        <CopyLinkButton />
+      </div>
+
+      {/* Connect prompt for unauthenticated visitors */}
+      {!isConnected && <ConnectPrompt />}
 
       {/* Header card */}
       <div className="rounded-2xl border border-border bg-card p-6 space-y-5">
@@ -709,9 +749,5 @@ export default function StreamPage({
   params: Promise<{ id: string }>
 }) {
   const { id } = use(params)
-  return (
-    <RequireWallet>
-      <StreamDetail id={id} />
-    </RequireWallet>
-  )
+  return <StreamDetail id={id} />
 }

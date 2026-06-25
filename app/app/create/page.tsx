@@ -1,10 +1,11 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { AlertTriangle, ArrowLeft, ArrowRight, Info, Loader2 } from 'lucide-react'
 import Link from 'next/link'
 import { toast } from 'sonner'
+import { StrKey } from '@stellar/stellar-sdk'
 import { RequireWallet } from '@/components/layout/require-wallet'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -18,11 +19,11 @@ import {
 } from '@/components/ui/select'
 import { useContract } from '@/hooks/use-contract'
 import { useWallet } from '@/hooks/use-wallet'
-import { AlertTriangle } from 'lucide-react'
 import { getAllTokens, saveCustomToken } from '@/lib/stellar'
-import { getTokenMetadata } from '@/lib/contract'
-import { parseTokenAmount } from '@/lib/stream-utils'
+import { getTokenMetadata, getTokenBalance } from '@/lib/contract'
+import { parseTokenAmount, formatTokenAmount } from '@/lib/stream-utils'
 import { StreamPreview } from '@/components/streams/stream-preview'
+import { CreateConfirmation } from '@/components/streams/create-confirmation'
 import type { TokenInfo } from '@/types/stream'
 
 const CUSTOM_VALUE = '__custom__'
@@ -72,6 +73,7 @@ function CreateForm() {
   const { createStream, estimateFee, pending, error } = useContract()
   const [feeEstimate, setFeeEstimate] = useState<string | null>(null)
   const [estimatingFee, setEstimatingFee] = useState(false)
+  const [showConfirmation, setShowConfirmation] = useState(false)
 
   const [tokens, setTokens] = useState<TokenInfo[]>(() => getAllTokens().map((t) => ({ ...t })))
   const [isCustom, setIsCustom] = useState(false)
@@ -79,6 +81,10 @@ function CreateForm() {
   const [customLoading, setCustomLoading] = useState(false)
   const [customError, setCustomError] = useState<string | null>(null)
   const [customToken, setCustomToken] = useState<TokenInfo | null>(null)
+
+  // Issue #29: balance state
+  const [tokenBalance, setTokenBalance] = useState<bigint | null>(null)
+  const [balanceLoading, setBalanceLoading] = useState(false)
 
   const defaultStart = localDatetimeMin(60)
   const defaultEnd = localDatetimeMin(60 + 30 * 24 * 3600)
@@ -99,6 +105,17 @@ function CreateForm() {
   const selectedToken = isCustom && customToken
     ? customToken
     : tokens.find((t) => t.address === form.tokenAddress) ?? tokens[0]
+
+  // Fetch balance when token or wallet changes
+  useEffect(() => {
+    if (!walletAddress || !selectedToken) return
+    setTokenBalance(null)
+    setBalanceLoading(true)
+    getTokenBalance(selectedToken.address, walletAddress)
+      .then(setTokenBalance)
+      .catch(() => setTokenBalance(null))
+      .finally(() => setBalanceLoading(false))
+  }, [selectedToken?.address, walletAddress])
 
   async function handleCustomTokenLookup() {
     if (!customAddress || customAddress.length < 56) {
@@ -133,11 +150,19 @@ function CreateForm() {
   function validate(): boolean {
     const newErrors: Partial<Record<keyof FormState, string>> = {}
 
-    if (!form.recipient.trim() || form.recipient.length < 56) {
-      newErrors.recipient = 'Enter a valid Stellar address (starts with G, 56 chars)'
+    // Issue #28: use StrKey for proper Stellar address validation
+    if (!form.recipient.trim() || !StrKey.isValidEd25519PublicKey(form.recipient.trim())) {
+      newErrors.recipient = 'Invalid Stellar address format'
     }
     if (!form.amount || isNaN(Number(form.amount)) || Number(form.amount) <= 0) {
       newErrors.amount = 'Enter a valid amount greater than 0'
+    }
+    // Issue #29: validate against balance
+    if (form.amount && tokenBalance !== null) {
+      const parsed = parseTokenAmount(form.amount, selectedToken.decimals)
+      if (parsed > tokenBalance) {
+        newErrors.amount = `Amount exceeds your balance (${formatTokenAmount(tokenBalance, selectedToken.decimals, 4)} ${selectedToken.symbol})`
+      }
     }
     if (isCustom && !customToken) {
       newErrors.tokenAddress = 'Look up a valid custom token first'
@@ -195,18 +220,29 @@ function CreateForm() {
     }
   }
 
-  async function handleSubmit(e: React.FormEvent) {
+  function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!validate()) return
+    // Issue #30: show confirmation dialog instead of immediately transacting
+    setShowConfirmation(true)
+  }
 
+  async function handleConfirmedCreate() {
     try {
       const id = await createStream(buildInput())
+      setShowConfirmation(false)
       toast.success('Stream created', { description: `Stream #${id} is live.` })
       router.push(`/app/stream/${id}`)
     } catch {
       // error is exposed via useContract
     }
   }
+
+  const input = showConfirmation ? buildInput() : null
+  const durationSeconds = (new Date(form.endDate).getTime() - new Date(form.startDate).getTime()) / 1000
+  const amountPerSecond = input && durationSeconds > 0
+    ? input.totalAmount / BigInt(Math.floor(durationSeconds))
+    : 0n
 
   return (
     <div className="mx-auto max-w-4xl">
@@ -300,17 +336,39 @@ function CreateForm() {
           )}
 
           <div className="space-y-1.5">
-            <Label htmlFor="amount">Total amount ({selectedToken.symbol})</Label>
-            <Input
-              id="amount"
-              type="number"
-              min="0"
-              step="any"
-              placeholder="e.g. 10000"
-              value={form.amount}
-              onChange={(e) => set('amount', e.target.value)}
-              aria-invalid={!!errors.amount}
-            />
+            {/* Issue #29: show balance + Max button */}
+            <div className="flex items-center justify-between">
+              <Label htmlFor="amount">Total amount ({selectedToken.symbol})</Label>
+              <span className="text-xs text-muted-foreground">
+                {balanceLoading
+                  ? 'Loading balance…'
+                  : tokenBalance !== null
+                  ? `Balance: ${formatTokenAmount(tokenBalance, selectedToken.decimals, 4)} ${selectedToken.symbol}`
+                  : null}
+              </span>
+            </div>
+            <div className="flex gap-2">
+              <Input
+                id="amount"
+                type="number"
+                min="0"
+                step="any"
+                placeholder="e.g. 10000"
+                value={form.amount}
+                onChange={(e) => set('amount', e.target.value)}
+                aria-invalid={!!errors.amount}
+              />
+              {tokenBalance !== null && tokenBalance > 0n && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => set('amount', formatTokenAmount(tokenBalance, selectedToken.decimals, selectedToken.decimals))}
+                >
+                  Max
+                </Button>
+              )}
+            </div>
             {errors.amount && (
               <p className="text-xs text-destructive">{errors.amount}</p>
             )}
@@ -526,6 +584,25 @@ function CreateForm() {
         />
       </aside>
       </div>
+
+      {/* Issue #30: confirmation dialog */}
+      {input && (
+        <CreateConfirmation
+          open={showConfirmation}
+          onConfirm={handleConfirmedCreate}
+          onCancel={() => setShowConfirmation(false)}
+          pending={pending}
+          feeEstimate={feeEstimate}
+          recipient={input.recipient}
+          token={input.token}
+          totalAmount={input.totalAmount}
+          startTime={input.startTime}
+          endTime={input.endTime}
+          cliffTime={input.cliffTime}
+          cliffAmount={input.cliffAmount}
+          amountPerSecond={amountPerSecond}
+        />
+      )}
     </div>
   )
 }
