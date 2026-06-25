@@ -7,15 +7,9 @@ import {
   xdr,
   rpc as StellarRpc,
 } from '@stellar/stellar-sdk'
-import { server, NETWORK, STREAM_CONTRACT_ID, IS_MOCK_MODE } from '@/lib/stellar'
-import { KNOWN_TOKENS } from '@/lib/stellar'
+import { type NetworkName, getNetworkConfig, getServer, getAllTokens } from '@/lib/stellar'
 import { mockStore } from '@/lib/mock-data'
 import type { CreateStreamInput, StreamData, TokenInfo } from '@/types/stream'
-
-// ─── Toggle ───────────────────────────────────────────────────────────────────
-// Driven by NEXT_PUBLIC_STREAM_CONTRACT_ID: mock mode is on whenever no contract
-// ID is configured, and switches to live calls once one is set.
-const USE_MOCK = IS_MOCK_MODE
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -35,17 +29,20 @@ const FEE_BUFFER = 1.15 // 15% above minimum to ensure inclusion
 
 /** Build and simulate a contract call, returning the prepared tx and estimated fee. */
 async function buildAndSimulate(
+  network: NetworkName,
   method: string,
   args: xdr.ScVal[],
   signerAddress: string,
-  contractAddress: string = STREAM_CONTRACT_ID,
+  contractAddress: string,
 ) {
+  const config = getNetworkConfig(network)
+  const server = getServer(network)
   const contract = new Contract(contractAddress)
   const account = await server.getAccount(signerAddress)
 
   const tx = new TransactionBuilder(account, {
     fee: '100000',
-    networkPassphrase: NETWORK.passphrase,
+    networkPassphrase: config.passphrase,
   })
     .addOperation(contract.call(method, ...args))
     .setTimeout(180)
@@ -66,17 +63,19 @@ async function buildAndSimulate(
 
 /** Build, simulate, sign, and submit a contract call. Returns the transaction hash. */
 async function invoke(
+  network: NetworkName,
   method: string,
   args: xdr.ScVal[],
   signerAddress: string,
-  contractAddress: string = STREAM_CONTRACT_ID,
+  contractAddress: string,
 ): Promise<string> {
-  const { prepared } = await buildAndSimulate(method, args, signerAddress, contractAddress)
+  const config = getNetworkConfig(network)
+  const { prepared } = await buildAndSimulate(network, method, args, signerAddress, contractAddress)
   const signedXdr = await signTx(prepared.toXDR())
   // Submit the signed XDR directly via the RPC JSON-RPC endpoint.
   // We bypass TransactionBuilder.fromXDR because Freighter may return a
   // FeeBumpTransaction envelope (type 4) which fromXDR can't handle.
-  const rpcResponse = await fetch(NETWORK.rpcUrl, {
+  const rpcResponse = await fetch(config.rpcUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -106,7 +105,7 @@ async function invoke(
 
   while (pollStatus !== 'SUCCESS' && pollStatus !== 'FAILED') {
     await new Promise((r) => setTimeout(r, 2000))
-    const pollRes = await fetch(NETWORK.rpcUrl, {
+    const pollRes = await fetch(config.rpcUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -130,8 +129,15 @@ async function invoke(
 }
 
 /** Simulate a read-only call (no signing). */
-async function query(method: string, args: xdr.ScVal[]): Promise<xdr.ScVal> {
-  const contract = new Contract(STREAM_CONTRACT_ID)
+async function query(
+  network: NetworkName,
+  method: string,
+  args: xdr.ScVal[],
+  contractAddress: string,
+): Promise<xdr.ScVal> {
+  const config = getNetworkConfig(network)
+  const server = getServer(network)
+  const contract = new Contract(contractAddress)
   // Use a dummy account for simulation reads
   const dummyKeypair = {
     accountId: () => 'GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN',
@@ -141,7 +147,7 @@ async function query(method: string, args: xdr.ScVal[]): Promise<xdr.ScVal> {
   const account = await server.getAccount(dummyKeypair.accountId())
   const tx = new TransactionBuilder(account, {
     fee: '100',
-    networkPassphrase: NETWORK.passphrase,
+    networkPassphrase: config.passphrase,
   })
     .addOperation(contract.call(method, ...args))
     .setTimeout(10)
@@ -156,11 +162,12 @@ async function query(method: string, args: xdr.ScVal[]): Promise<xdr.ScVal> {
 }
 
 /** Map a contract Stream ScVal → StreamData. */
-function scValToStreamData(val: xdr.ScVal): StreamData {
+function scValToStreamData(network: NetworkName, val: xdr.ScVal): StreamData {
   const raw = scValToNative(val) as Record<string, unknown>
 
   const tokenAddress = String(raw.token)
-  const knownToken = KNOWN_TOKENS.find((t) => t.address === tokenAddress)
+  const knownTokens = getAllTokens(network)
+  const knownToken = knownTokens.find((t) => t.address === tokenAddress)
   const token: TokenInfo = knownToken ?? {
     address: tokenAddress,
     symbol: 'UNK',
@@ -192,10 +199,14 @@ export interface FeeEstimate {
 }
 
 export async function estimateCreateStreamFee(
+  network: NetworkName,
   input: CreateStreamInput,
   sender: string,
 ): Promise<FeeEstimate> {
-  if (USE_MOCK) {
+  const config = getNetworkConfig(network)
+  const isMockMode = !config.streamContractId
+  
+  if (isMockMode) {
     return { minFee: 100000, estimatedFee: 115000, estimatedFeeXlm: '0.0115' }
   }
 
@@ -217,9 +228,11 @@ export async function estimateCreateStreamFee(
   )
 
   const { minFee, estimatedFee } = await buildAndSimulate(
+    network,
     'create_stream',
     [new Address(sender).toScVal(), params],
     sender,
+    config.streamContractId,
   )
 
   return {
@@ -230,24 +243,30 @@ export async function estimateCreateStreamFee(
 }
 
 export async function createStream(
+  network: NetworkName,
   input: CreateStreamInput,
   sender: string,
 ): Promise<string> {
-  if (USE_MOCK) {
+  const config = getNetworkConfig(network)
+  const isMockMode = !config.streamContractId
+  
+  if (isMockMode) {
     await new Promise((r) => setTimeout(r, 700))
     return mockStore.create(input, sender).id
   }
 
   // Step 1: approve the streaming contract to pull `totalAmount` from the sender.
   // The allowance needs to outlast the simulation ledger — set it to current + 500 ledgers.
+  const server = getServer(network)
   const currentLedger = (await server.getLatestLedger()).sequence
   const expirationLedger = currentLedger + 500
 
   await invoke(
+    network,
     'approve',
     [
       new Address(sender).toScVal(),                              // from
-      new Address(STREAM_CONTRACT_ID).toScVal(),                  // spender
+      new Address(config.streamContractId).toScVal(),                  // spender
       nativeToScVal(input.totalAmount, { type: 'i128' }),        // amount
       nativeToScVal(expirationLedger, { type: 'u32' }),          // expiration_ledger
     ],
@@ -274,6 +293,7 @@ export async function createStream(
   )
 
   const result = await invoke(
+    network,
     'create_stream',
     [new Address(sender).toScVal(), params],
     sender,
@@ -281,7 +301,7 @@ export async function createStream(
 
   // SDK v13 can't parse TransactionMetaV4 (protocol 22+) so returnValue is void.
   // Instead, query the sender's stream list and return the highest ID — that's the new stream.
-  const sentResult = await query('get_sent_streams', [new Address(sender).toScVal(), nativeToScVal(0, { type: 'u32' }), nativeToScVal(1000, { type: 'u32' })])
+  const sentResult = await query(network, 'get_sent_streams', [new Address(sender).toScVal(), nativeToScVal(0, { type: 'u32' }), nativeToScVal(1000, { type: 'u32' })], config.streamContractId)
   const ids = scValToNative(sentResult) as bigint[]
   if (!ids || ids.length === 0) throw new Error('Stream created but could not retrieve ID')
   const newId = ids.reduce((a, b) => (a > b ? a : b))
@@ -289,45 +309,64 @@ export async function createStream(
 }
 
 export async function withdrawFromStream(
+  network: NetworkName,
   id: string,
   amount: bigint,
 ): Promise<string | null> {
-  if (USE_MOCK) {
+  const config = getNetworkConfig(network)
+  const isMockMode = !config.streamContractId
+  
+  if (isMockMode) {
     await new Promise((r) => setTimeout(r, 700))
     mockStore.withdraw(id, amount)
     return null
   }
-  const stream = await fetchStream(id)
+  const stream = await fetchStream(network, id)
   if (!stream) throw new Error('Stream not found')
 
   return invoke(
+    network,
     'withdraw',
     [
       nativeToScVal(BigInt(id), { type: 'u64' }),
       nativeToScVal(amount,     { type: 'i128' }),
     ],
     stream.recipient,
+    config.streamContractId,
   )
 }
 
-export async function cancelStream(id: string): Promise<string | null> {
-  if (USE_MOCK) {
+export async function cancelStream(
+  network: NetworkName,
+  id: string,
+): Promise<string | null> {
+  const config = getNetworkConfig(network)
+  const isMockMode = !config.streamContractId
+  
+  if (isMockMode) {
     await new Promise((r) => setTimeout(r, 700))
     mockStore.cancel(id)
     return null
   }
-  const stream = await fetchStream(id)
+  const stream = await fetchStream(network, id)
   if (!stream) throw new Error('Stream not found')
 
   return invoke(
+    network,
     'cancel',
     [nativeToScVal(BigInt(id), { type: 'u64' })],
     stream.sender,
+    config.streamContractId,
   )
 }
 
-export async function getTokenMetadata(tokenAddress: string): Promise<TokenInfo | null> {
+export async function getTokenMetadata(
+  network: NetworkName,
+  tokenAddress: string,
+): Promise<TokenInfo | null> {
   try {
+    const config = getNetworkConfig(network)
+    const server = getServer(network)
     const contract = new Contract(tokenAddress)
     const dummyAccount = await server.getAccount(
       'GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN',
@@ -336,7 +375,7 @@ export async function getTokenMetadata(tokenAddress: string): Promise<TokenInfo 
     const buildSimTx = (method: string) => {
       const tx = new TransactionBuilder(dummyAccount, {
         fee: '100',
-        networkPassphrase: NETWORK.passphrase,
+        networkPassphrase: config.passphrase,
       })
         .addOperation(contract.call(method))
         .setTimeout(10)
@@ -368,19 +407,24 @@ export async function getTokenMetadata(tokenAddress: string): Promise<TokenInfo 
 }
 
 export async function getTokenBalance(
+  network: NetworkName,
   tokenAddress: string,
   accountAddress: string,
 ): Promise<bigint> {
-  if (USE_MOCK) return BigInt(1_000_000_0000000) // 1,000,000 units mock
+  const config = getNetworkConfig(network)
+  const isMockMode = !config.streamContractId
+  
+  if (isMockMode) return BigInt(1_000_000_0000000) // 1,000,000 units mock
 
   try {
+    const server = getServer(network)
     const contract = new Contract(tokenAddress)
     const account = await server.getAccount(
       'GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN',
     )
     const tx = new TransactionBuilder(account, {
       fee: '100',
-      networkPassphrase: NETWORK.passphrase,
+      networkPassphrase: config.passphrase,
     })
       .addOperation(contract.call('balance', new Address(accountAddress).toScVal()))
       .setTimeout(10)
@@ -396,41 +440,60 @@ export async function getTokenBalance(
   }
 }
 
-export async function bumpStreamTtl(id: string, signerAddress: string): Promise<void> {
-  if (USE_MOCK) return
+export async function bumpStreamTtl(
+  network: NetworkName,
+  id: string,
+  signerAddress: string,
+): Promise<void> {
+  const config = getNetworkConfig(network)
+  const isMockMode = !config.streamContractId
+  
+  if (isMockMode) return
 
   await invoke(
+    network,
     'bump_stream',
     [nativeToScVal(BigInt(id), { type: 'u64' })],
     signerAddress,
+    config.streamContractId,
   )
 }
 
-export async function fetchStream(id: string): Promise<StreamData | null> {
-  if (USE_MOCK) return mockStore.getById(id) ?? null
+export async function fetchStream(
+  network: NetworkName,
+  id: string,
+): Promise<StreamData | null> {
+  const config = getNetworkConfig(network)
+  const isMockMode = !config.streamContractId
+  
+  if (isMockMode) return mockStore.getById(id) ?? null
 
   try {
-    const result = await query('get_stream', [
+    const result = await query(network, 'get_stream', [
       nativeToScVal(BigInt(id), { type: 'u64' }),
-    ])
-    return scValToStreamData(result)
+    ], config.streamContractId)
+    return scValToStreamData(network, result)
   } catch {
     return null
   }
 }
 
 export async function fetchStreamsForAddress(
+  network: NetworkName,
   address: string,
 ): Promise<StreamData[]> {
-  if (USE_MOCK) {
+  const config = getNetworkConfig(network)
+  const isMockMode = !config.streamContractId
+  
+  if (isMockMode) {
     return mockStore
       .getAll()
       .filter((s) => s.sender === address || s.recipient === address)
   }
 
   const [sentIds, receivedIds] = await Promise.all([
-    query('get_sent_streams', [new Address(address).toScVal(), nativeToScVal(0, { type: 'u32' }), nativeToScVal(1000, { type: 'u32' })]),
-    query('get_received_streams', [new Address(address).toScVal(), nativeToScVal(0, { type: 'u32' }), nativeToScVal(1000, { type: 'u32' })]),
+    query(network, 'get_sent_streams', [new Address(address).toScVal(), nativeToScVal(0, { type: 'u32' }), nativeToScVal(1000, { type: 'u32' })], config.streamContractId),
+    query(network, 'get_received_streams', [new Address(address).toScVal(), nativeToScVal(0, { type: 'u32' }), nativeToScVal(1000, { type: 'u32' })], config.streamContractId),
   ])
 
   const allIds = [
@@ -440,6 +503,6 @@ export async function fetchStreamsForAddress(
   // Deduplicate (self-streams appear in both)
   const unique = [...new Set(allIds.map(String))]
 
-  const streams = await Promise.all(unique.map((id) => fetchStream(id)))
+  const streams = await Promise.all(unique.map((id) => fetchStream(network, id)))
   return streams.filter((s): s is StreamData => s !== null)
 }

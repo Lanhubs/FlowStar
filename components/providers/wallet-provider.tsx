@@ -10,7 +10,8 @@ import {
   type ReactNode,
 } from 'react'
 import { setSignTransaction } from '@/lib/contract'
-import { NETWORK } from '@/lib/stellar'
+import { type NetworkName, getNetworkConfig } from '@/lib/stellar'
+import { useNetwork } from './network-provider'
 
 // ─── Wallet options ───────────────────────────────────────────────────────────
 
@@ -36,7 +37,7 @@ interface WalletContextValue {
   isConnected: boolean
   connect: (walletId: string) => Promise<void>
   disconnect: () => void
-  signTransaction: (xdr: string) => Promise<string>
+  signTransaction: (xdr: string, network?: NetworkName) => Promise<string>
 }
 
 const WalletContext = createContext<WalletContextValue | null>(null)
@@ -56,10 +57,10 @@ async function connectFreighter(): Promise<string> {
   return result.address
 }
 
-async function signWithFreighter(xdr: string): Promise<string> {
+async function signWithFreighter(xdr: string, networkPassphrase: string): Promise<string> {
   const { signTransaction } = await import('@stellar/freighter-api')
   const result = await signTransaction(xdr, {
-    networkPassphrase: NETWORK.passphrase,
+    networkPassphrase,
   })
   if (result.error) throw new Error(result.error)
   return result.signedTxXdr
@@ -82,19 +83,13 @@ async function connectWallet(id: string): Promise<string> {
   }
 }
 
-async function signWithWallet(id: string, xdr: string): Promise<string> {
-  switch (id) {
-    case 'freighter': return signWithFreighter(xdr)
-    default: throw new Error(`Signing not implemented for ${id}`)
-  }
-}
-
 // ─── Provider ─────────────────────────────────────────────────────────────────
 
 export function WalletProvider({ children }: { children: ReactNode }) {
   const [address, setAddress] = useState<string | null>(null)
   const [walletId, setWalletId] = useState<string | null>(null)
   const [connecting, setConnecting] = useState(false)
+  const { network } = useNetwork()
 
   const connect = useCallback(async (id: string) => {
     setConnecting(true)
@@ -113,16 +108,20 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const signTransaction = useCallback(
-    async (xdr: string): Promise<string> => {
+    async (xdr: string, customNetwork?: NetworkName): Promise<string> => {
       if (!walletId) throw new Error('No wallet connected')
-      return signWithWallet(walletId, xdr)
+      const config = getNetworkConfig(customNetwork || network)
+      switch (walletId) {
+        case 'freighter': return signWithFreighter(xdr, config.passphrase)
+        default: throw new Error(`Signing not implemented for ${walletId}`)
+      }
     },
-    [walletId],
+    [walletId, network],
   )
 
   // Keep contract layer in sync
   useEffect(() => {
-    setSignTransaction(signTransaction)
+    setSignTransaction((xdr: string) => signTransaction(xdr))
   }, [signTransaction])
 
   const value = useMemo<WalletContextValue>(
