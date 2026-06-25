@@ -14,6 +14,9 @@ import {
   AlertTriangle,
   Link as LinkIcon,
   Wallet,
+  Share2,
+  MessageCircle,
+  Twitter,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { ConnectWalletButton } from '@/components/layout/connect-wallet-button'
@@ -446,23 +449,72 @@ function RateDisplay({ stream }: { stream: import('@/types/stream').StreamData }
 
 // ─── Main page ───────────────────────────────────────────────────────────────
 
-function CopyLinkButton() {
+function ShareButtons({ streamId }: { streamId: string }) {
   const [copied, setCopied] = useState(false)
-  function copy() {
-    navigator.clipboard.writeText(window.location.href)
+  const [showShare, setShowShare] = useState(false)
+
+  const streamUrl = typeof window !== 'undefined' ? window.location.href : `https://flowstar.app/app/stream/${streamId}`
+  const shareText = `Check out this token stream on FlowStar - Stream #${streamId}`
+
+  function copyLink() {
+    navigator.clipboard.writeText(streamUrl)
     setCopied(true)
     setTimeout(() => setCopied(false), 1500)
     toast.success('Link copied to clipboard')
   }
+
+  function shareToTwitter() {
+    const url = `https://twitter.com/intent/tweet?text=${encodeURIComponent(shareText)}&url=${encodeURIComponent(streamUrl)}`
+    window.open(url, '_blank', 'width=550,height=420')
+  }
+
+  function shareToTelegram() {
+    const url = `https://t.me/share/url?url=${encodeURIComponent(streamUrl)}&text=${encodeURIComponent(shareText)}`
+    window.open(url, '_blank', 'width=550,height=420')
+  }
+
   return (
-    <button
-      onClick={copy}
-      className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
-      aria-label="Copy stream link"
-    >
-      {copied ? <Check className="size-4" /> : <LinkIcon className="size-4" />}
-      {copied ? 'Copied!' : 'Copy link'}
-    </button>
+    <div className="relative">
+      <button
+        onClick={() => setShowShare(!showShare)}
+        className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+        aria-label="Share stream"
+      >
+        <Share2 className="size-4" />
+        Share
+      </button>
+
+      {showShare && (
+        <div className="absolute right-0 mt-2 bg-card border border-border rounded-lg shadow-lg z-50">
+          <div className="flex flex-col gap-1 p-2 min-w-max">
+            <button
+              onClick={copyLink}
+              className="inline-flex items-center gap-2 px-3 py-2 text-sm text-muted-foreground hover:text-foreground hover:bg-secondary rounded transition-colors"
+              aria-label="Copy link"
+            >
+              {copied ? <Check className="size-4" /> : <LinkIcon className="size-4" />}
+              {copied ? 'Copied!' : 'Copy link'}
+            </button>
+            <button
+              onClick={shareToTwitter}
+              className="inline-flex items-center gap-2 px-3 py-2 text-sm text-muted-foreground hover:text-foreground hover:bg-secondary rounded transition-colors"
+              aria-label="Share on Twitter"
+            >
+              <Twitter className="size-4" />
+              Twitter
+            </button>
+            <button
+              onClick={shareToTelegram}
+              className="inline-flex items-center gap-2 px-3 py-2 text-sm text-muted-foreground hover:text-foreground hover:bg-secondary rounded transition-colors"
+              aria-label="Share on Telegram"
+            >
+              <MessageCircle className="size-4" />
+              Telegram
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -523,7 +575,7 @@ function StreamDetail({ id }: { id: string }) {
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
-      {/* Back + Copy link */}
+      {/* Back + Share */}
       <div className="flex items-center justify-between">
         <Link
           href="/app"
@@ -532,7 +584,7 @@ function StreamDetail({ id }: { id: string }) {
           <ArrowLeft className="size-4" />
           Dashboard
         </Link>
-        <CopyLinkButton />
+        <ShareButtons streamId={stream.id} />
       </div>
 
       {/* Connect prompt for unauthenticated visitors */}
