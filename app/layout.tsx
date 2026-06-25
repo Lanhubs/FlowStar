@@ -1,6 +1,8 @@
 import { Analytics } from '@vercel/analytics/next'
 import type { Metadata, Viewport } from 'next'
 import { Geist, Geist_Mono } from 'next/font/google'
+import { ThemeProvider } from 'next-themes'
+import { NetworkProvider } from '@/components/providers/network-provider'
 import { WalletProvider } from '@/components/providers/wallet-provider'
 import { Toaster } from '@/components/ui/sonner'
 import './globals.css'
@@ -44,7 +46,6 @@ export const metadata: Metadata = {
 }
 
 export const viewport: Viewport = {
-  colorScheme: 'dark',
   themeColor: '#0c1014',
 }
 
@@ -57,13 +58,23 @@ export default function RootLayout({
     <html
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} bg-background`}
+      suppressHydrationWarning
     >
       <body className="font-sans antialiased">
-        <WalletProvider>
-          {children}
-          <Toaster position="top-right" />
-        </WalletProvider>
-        {process.env.NODE_ENV === 'production' && <Analytics />}
+        <ThemeProvider
+          attribute="class"
+          defaultTheme="system"
+          enableSystem
+          disableTransitionOnChange
+        >
+          <NetworkProvider>
+            <WalletProvider>
+              {children}
+              <Toaster position="top-right" />
+            </WalletProvider>
+          </NetworkProvider>
+          {process.env.NODE_ENV === 'production' && <Analytics />}
+        </ThemeProvider>
       </body>
     </html>
   )

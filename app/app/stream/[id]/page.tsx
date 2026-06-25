@@ -14,6 +14,9 @@ import {
   AlertTriangle,
   Link as LinkIcon,
   Wallet,
+  Share2,
+  MessageCircle,
+  Send,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { ConnectWalletButton } from '@/components/layout/connect-wallet-button'
@@ -24,6 +27,7 @@ import { CountdownTimer } from '@/components/ui/countdown-timer'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { FeeEstimateDialog } from '@/components/ui/fee-estimate-dialog'
 import {
   Dialog,
   DialogContent,
@@ -31,6 +35,7 @@ import {
   DialogTitle,
   DialogDescription,
 } from '@/components/ui/dialog'
+import { calculateFeeBreakdown, TYPICAL_FEES, isHighFee } from '@/lib/fee-utils'
 import { useStream } from '@/hooks/use-streams'
 import { useContract } from '@/hooks/use-contract'
 import { useWallet } from '@/hooks/use-wallet'
@@ -46,7 +51,7 @@ import {
   shortenAddress,
   formatRate,
 } from '@/lib/stream-utils'
-import { NETWORK, explorerUrl } from '@/lib/stellar'
+import { NETWORK, STREAM_CONTRACT_ID, explorerUrl } from '@/lib/stellar'
 import { useAutoWithdraw } from '@/hooks/use-auto-withdraw'
 import { UnlockChart } from '@/components/streams/unlock-chart'
 import { bumpStreamTtl } from '@/lib/contract'
@@ -116,10 +121,16 @@ function WithdrawDialog({
 }) {
   const { withdraw, pending, error } = useContract()
   const [inputAmount, setInputAmount] = useState('')
+  const [showFeeEstimate, setShowFeeEstimate] = useState(false)
 
   const max = formatTokenAmount(withdrawable, token.decimals, token.decimals)
   const parsed = inputAmount ? parseTokenAmount(inputAmount, token.decimals) : 0n
   const invalid = parsed <= 0n || parsed > withdrawable
+
+  // Calculate estimated fees
+  const estimatedFee = TYPICAL_FEES.withdraw.typical
+  const feeBreakdown = calculateFeeBreakdown(estimatedFee)
+  const withdrawFeeHigh = isHighFee(estimatedFee, TYPICAL_FEES.withdraw.typical)
 
   async function handleWithdraw() {
     try {
@@ -141,54 +152,81 @@ function WithdrawDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="sm:max-w-sm">
-        <DialogHeader>
-          <DialogTitle>Withdraw funds</DialogTitle>
-          <DialogDescription>
-            Enter how much to withdraw. Max:{' '}
-            <span className="font-mono font-medium text-foreground">
-              {max} {token.symbol}
-            </span>
-          </DialogDescription>
-        </DialogHeader>
-        <div className="space-y-4 pt-1">
-          <div className="space-y-1.5">
-            <Label htmlFor="withdraw-amount">Amount ({token.symbol})</Label>
-            <div className="flex gap-2">
-              <Input
-                id="withdraw-amount"
-                type="number"
-                min="0"
-                step="any"
-                placeholder="0.00"
-                value={inputAmount}
-                onChange={(e) => setInputAmount(e.target.value)}
-                aria-invalid={!!inputAmount && invalid}
-              />
+    <>
+      <Dialog open={open && !showFeeEstimate} onOpenChange={(o) => !o && onClose()}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Withdraw funds</DialogTitle>
+            <DialogDescription>
+              Enter how much to withdraw. Max:{' '}
+              <span className="font-mono font-medium text-foreground">
+                {max} {token.symbol}
+              </span>
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 pt-1">
+            <div className="space-y-1.5">
+              <Label htmlFor="withdraw-amount">Amount ({token.symbol})</Label>
+              <div className="flex gap-2">
+                <Input
+                  id="withdraw-amount"
+                  type="number"
+                  min="0"
+                  step="any"
+                  placeholder="0.00"
+                  value={inputAmount}
+                  onChange={(e) => setInputAmount(e.target.value)}
+                  aria-invalid={!!inputAmount && invalid}
+                />
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setInputAmount(max)}
+                >
+                  Max
+                </Button>
+              </div>
+              {inputAmount && invalid && (
+                <p className="text-xs text-destructive">Amount exceeds withdrawable balance</p>
+              )}
+            </div>
+
+            {/* Fee info */}
+            <div className="rounded-lg bg-secondary/50 p-3 space-y-2">
+              <p className="text-xs text-muted-foreground">
+                Estimated network fee: <span className="font-mono text-foreground">{(estimatedFee / 1e7).toFixed(7)} XLM</span>
+              </p>
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                Fee will be shown again before wallet confirmation.
+              </p>
+            </div>
+
+            {error && <p className="text-xs text-destructive">{error}</p>}
+            <div className="flex justify-end gap-2">
+              <Button variant="ghost" onClick={onClose} disabled={pending}>Cancel</Button>
               <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                onClick={() => setInputAmount(max)}
+                onClick={() => setShowFeeEstimate(true)}
+                disabled={pending || invalid || !inputAmount}
               >
-                Max
+                {pending ? 'Withdrawing…' : 'Review fees'}
               </Button>
             </div>
-            {inputAmount && invalid && (
-              <p className="text-xs text-destructive">Amount exceeds withdrawable balance</p>
-            )}
           </div>
-          {error && <p className="text-xs text-destructive">{error}</p>}
-          <div className="flex justify-end gap-2">
-            <Button variant="ghost" onClick={onClose} disabled={pending}>Cancel</Button>
-            <Button onClick={handleWithdraw} disabled={pending || invalid || !inputAmount}>
-              {pending ? 'Withdrawing…' : 'Withdraw'}
-            </Button>
-          </div>
-        </div>
-      </DialogContent>
-    </Dialog>
+        </DialogContent>
+      </Dialog>
+
+      <FeeEstimateDialog
+        open={showFeeEstimate}
+        onConfirm={handleWithdraw}
+        onCancel={() => setShowFeeEstimate(false)}
+        fees={feeBreakdown}
+        action="withdrawal"
+        averageFee={TYPICAL_FEES.withdraw.typical}
+        isHighFee={withdrawFeeHigh}
+        loading={pending}
+      />
+    </>
   )
 }
 
@@ -205,6 +243,11 @@ function CancelDialog({
 }) {
   const { cancel, pending, error } = useContract()
   const router = useRouter()
+  const [showFeeEstimate, setShowFeeEstimate] = useState(false)
+
+  const estimatedFee = TYPICAL_FEES.cancel.typical
+  const feeBreakdown = calculateFeeBreakdown(estimatedFee)
+  const cancelFeeHigh = isHighFee(estimatedFee, TYPICAL_FEES.cancel.typical)
 
   async function handleCancel() {
     try {
@@ -226,24 +269,49 @@ function CancelDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="sm:max-w-sm">
-        <DialogHeader>
-          <DialogTitle>Cancel stream</DialogTitle>
-          <DialogDescription>
-            Unlocked funds will be sent to the recipient. Any remaining locked
-            tokens will be returned to your wallet. This cannot be undone.
-          </DialogDescription>
-        </DialogHeader>
-        {error && <p className="text-sm text-destructive">{error}</p>}
-        <div className="flex justify-end gap-2 pt-2">
-          <Button variant="ghost" onClick={onClose} disabled={pending}>Keep stream</Button>
-          <Button variant="destructive" onClick={handleCancel} disabled={pending}>
-            {pending ? 'Cancelling…' : 'Cancel stream'}
-          </Button>
-        </div>
-      </DialogContent>
-    </Dialog>
+    <>
+      <Dialog open={open && !showFeeEstimate} onOpenChange={(o) => !o && onClose()}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Cancel stream</DialogTitle>
+            <DialogDescription>
+              Unlocked funds will be sent to the recipient. Any remaining locked
+              tokens will be returned to your wallet. This cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+
+          {/* Fee info */}
+          <div className="rounded-lg bg-secondary/50 p-3 space-y-2">
+            <p className="text-xs text-muted-foreground">
+              Estimated network fee: <span className="font-mono text-foreground">{(estimatedFee / 1e7).toFixed(7)} XLM</span>
+            </p>
+          </div>
+
+          {error && <p className="text-sm text-destructive">{error}</p>}
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="ghost" onClick={onClose} disabled={pending}>Keep stream</Button>
+            <Button
+              variant="destructive"
+              onClick={() => setShowFeeEstimate(true)}
+              disabled={pending}
+            >
+              {pending ? 'Cancelling…' : 'Review & cancel'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <FeeEstimateDialog
+        open={showFeeEstimate}
+        onConfirm={handleCancel}
+        onCancel={() => setShowFeeEstimate(false)}
+        fees={feeBreakdown}
+        action="stream cancellation"
+        averageFee={TYPICAL_FEES.cancel.typical}
+        isHighFee={cancelFeeHigh}
+        loading={pending}
+      />
+    </>
   )
 }
 
@@ -261,8 +329,17 @@ function AutoWithdrawSection({
 }: {
   stream: import('@/types/stream').StreamData
 }) {
-  const { settings, updateSettings, lastAutoWithdraw, autoWithdrawPending } = useAutoWithdraw(stream)
+  const { settings, updateSettings, lastAutoWithdraw, autoWithdrawPending, withdrawalHistory } = useAutoWithdraw(stream)
   const [minDisplay, setMinDisplay] = useState('')
+  const [maxDisplay, setMaxDisplay] = useState('')
+  const [showHistory, setShowHistory] = useState(false)
+
+  const STRATEGY_OPTIONS: Array<{ value: import('@/hooks/use-auto-withdraw').WithdrawStrategy; label: string; description: string }> = [
+    { value: 'time-based', label: 'Time-based', description: 'Withdraw on fixed intervals' },
+    { value: 'threshold-based', label: 'Threshold-based', description: 'Withdraw when amount reaches threshold' },
+    { value: 'gas-optimized', label: 'Gas-optimized', description: 'Limit frequency to reduce gas costs' },
+    { value: 'max', label: 'Max amount', description: 'Always withdraw maximum available' },
+  ]
 
   return (
     <div className="rounded-2xl border border-border bg-card p-6 space-y-4">
@@ -286,31 +363,72 @@ function AutoWithdrawSection({
       </div>
 
       {settings.enabled && (
-        <div className="space-y-3 pt-1">
+        <div className="space-y-4 pt-1">
           <p className="text-xs text-muted-foreground">
-            Automatically withdraw available funds on an interval. The app must be open and your wallet connected.
+            Automatically withdraw funds using your chosen strategy. The app must be open and your wallet connected.
           </p>
 
           <div className="space-y-1.5">
-            <Label className="text-xs">Frequency</Label>
-            <div className="flex flex-wrap gap-2">
-              {INTERVAL_OPTIONS.map((opt) => (
+            <Label className="text-xs">Strategy</Label>
+            <div className="space-y-2">
+              {STRATEGY_OPTIONS.map((opt) => (
                 <button
-                  key={opt.hours}
+                  key={opt.value}
                   type="button"
-                  onClick={() => updateSettings({ intervalHours: opt.hours })}
+                  onClick={() => updateSettings({ strategy: opt.value })}
                   className={
-                    'rounded-full border px-3 py-1 text-xs font-medium transition-colors ' +
-                    (settings.intervalHours === opt.hours
-                      ? 'border-primary bg-primary/10 text-primary'
-                      : 'border-border text-muted-foreground hover:border-primary hover:text-primary')
+                    'w-full text-left p-3 rounded-lg border transition-colors ' +
+                    (settings.strategy === opt.value
+                      ? 'border-primary bg-primary/10'
+                      : 'border-border hover:border-primary/50')
                   }
                 >
-                  {opt.label}
+                  <p className="text-sm font-medium">{opt.label}</p>
+                  <p className="text-xs text-muted-foreground">{opt.description}</p>
                 </button>
               ))}
             </div>
           </div>
+
+          {settings.strategy === 'time-based' && (
+            <div className="space-y-1.5">
+              <Label className="text-xs">Frequency</Label>
+              <div className="flex flex-wrap gap-2">
+                {INTERVAL_OPTIONS.map((opt) => (
+                  <button
+                    key={opt.hours}
+                    type="button"
+                    onClick={() => updateSettings({ intervalHours: opt.hours })}
+                    className={
+                      'rounded-full border px-3 py-1 text-xs font-medium transition-colors ' +
+                      (settings.intervalHours === opt.hours
+                        ? 'border-primary bg-primary/10 text-primary'
+                        : 'border-border text-muted-foreground hover:border-primary hover:text-primary')
+                    }
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {settings.strategy === 'threshold-based' && (
+            <div className="space-y-1.5">
+              <Label htmlFor="threshold" className="text-xs">
+                Threshold (% of total deposited)
+              </Label>
+              <Input
+                id="threshold"
+                type="number"
+                min="1"
+                max="100"
+                value={settings.thresholdPercentage}
+                onChange={(e) => updateSettings({ thresholdPercentage: parseInt(e.target.value) || 50 })}
+                className="max-w-48"
+              />
+            </div>
+          )}
 
           <div className="space-y-1.5">
             <Label htmlFor="min-amount" className="text-xs">
@@ -337,6 +455,31 @@ function AutoWithdrawSection({
             </p>
           </div>
 
+          <div className="space-y-1.5">
+            <Label htmlFor="max-limit" className="text-xs">
+              Maximum safety limit ({stream.token.symbol})
+            </Label>
+            <Input
+              id="max-limit"
+              type="number"
+              min="0"
+              step="any"
+              placeholder="0 (no limit)"
+              value={maxDisplay}
+              onChange={(e) => {
+                setMaxDisplay(e.target.value)
+                const raw = e.target.value
+                  ? parseTokenAmount(e.target.value, stream.token.decimals).toString()
+                  : '0'
+                updateSettings({ maxSafetyLimitRaw: raw })
+              }}
+              className="max-w-48"
+            />
+            <p className="text-xs text-muted-foreground">
+              Never withdraw more than this amount per transaction.
+            </p>
+          </div>
+
           {autoWithdrawPending && (
             <p className="text-xs text-primary">Auto-withdrawing...</p>
           )}
@@ -344,6 +487,29 @@ function AutoWithdrawSection({
             <p className="text-xs text-muted-foreground">
               Last auto-withdrawal: {new Date(lastAutoWithdraw).toLocaleTimeString()}
             </p>
+          )}
+
+          {withdrawalHistory.length > 0 && (
+            <div className="space-y-1.5 pt-2 border-t border-border">
+              <button
+                onClick={() => setShowHistory(!showHistory)}
+                className="text-xs text-primary hover:underline"
+              >
+                {showHistory ? 'Hide' : 'Show'} withdrawal history ({withdrawalHistory.length})
+              </button>
+              {showHistory && (
+                <div className="space-y-1 max-h-32 overflow-y-auto">
+                  {withdrawalHistory.map((entry, idx) => (
+                    <div key={idx} className="text-xs text-muted-foreground font-mono p-1.5 bg-secondary rounded">
+                      <p>{new Date(entry.timestamp).toLocaleTimeString()}</p>
+                      <p className={entry.error ? 'text-destructive' : 'text-primary'}>
+                        {entry.error ? `Error: ${entry.error}` : `Withdrew: ${entry.amount}`}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           )}
         </div>
       )}
@@ -446,23 +612,74 @@ function RateDisplay({ stream }: { stream: import('@/types/stream').StreamData }
 
 // ─── Main page ───────────────────────────────────────────────────────────────
 
-function CopyLinkButton() {
+function ShareButtons({ streamId }: { streamId: string }) {
   const [copied, setCopied] = useState(false)
-  function copy() {
-    navigator.clipboard.writeText(window.location.href)
+  const [showShare, setShowShare] = useState(false)
+
+  const streamUrl = typeof window !== 'undefined' ? window.location.href : `https://flowstar.app/app/stream/${streamId}`
+  const shareText = `Check out this token stream on FlowStar - Stream #${streamId}`
+
+  function copyLink() {
+    navigator.clipboard.writeText(streamUrl)
     setCopied(true)
     setTimeout(() => setCopied(false), 1500)
     toast.success('Link copied to clipboard')
   }
+
+  function shareToTwitter() {
+    const url = `https://twitter.com/intent/tweet?text=${encodeURIComponent(shareText)}&url=${encodeURIComponent(streamUrl)}`
+    window.open(url, '_blank', 'width=550,height=420')
+  }
+
+  function shareToTelegram() {
+    const url = `https://t.me/share/url?url=${encodeURIComponent(streamUrl)}&text=${encodeURIComponent(shareText)}`
+    window.open(url, '_blank', 'width=550,height=420')
+  }
+
   return (
-    <button
-      onClick={copy}
-      className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
-      aria-label="Copy stream link"
-    >
-      {copied ? <Check className="size-4" /> : <LinkIcon className="size-4" />}
-      {copied ? 'Copied!' : 'Copy link'}
-    </button>
+    <div className="relative">
+      <button
+        onClick={() => setShowShare(!showShare)}
+        className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+        aria-label="Share stream"
+      >
+        <Share2 className="size-4" />
+        Share
+      </button>
+
+      {showShare && (
+        <div className="absolute right-0 mt-2 bg-card border border-border rounded-lg shadow-lg z-50">
+          <div className="flex flex-col gap-1 p-2 min-w-max">
+            <button
+              onClick={copyLink}
+              className="inline-flex items-center gap-2 px-3 py-2 text-sm text-muted-foreground hover:text-foreground hover:bg-secondary rounded transition-colors"
+              aria-label="Copy link"
+            >
+              {copied ? <Check className="size-4" /> : <LinkIcon className="size-4" />}
+              {copied ? 'Copied!' : 'Copy link'}
+            </button>
+            <button
+              onClick={shareToTwitter}
+              className="inline-flex items-center gap-2 px-3 py-2 text-sm text-muted-foreground hover:text-foreground hover:bg-secondary rounded transition-colors"
+              aria-label="Share on Twitter"
+            >
+              <svg className="size-4" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M23 3a10.9 10.9 0 01-3.14 1.53 4.48 4.48 0 00-7.86 3v1A10.66 10.66 0 013 4s-4 9 5 13a11.64 11.64 0 01-7 2s9 5 20 5a9.5 9.5 0 00-9-5.5c4.75 2.25 7-7 7-7" />
+              </svg>
+              Twitter
+            </button>
+            <button
+              onClick={shareToTelegram}
+              className="inline-flex items-center gap-2 px-3 py-2 text-sm text-muted-foreground hover:text-foreground hover:bg-secondary rounded transition-colors"
+              aria-label="Share on Telegram"
+            >
+              <MessageCircle className="size-4" />
+              Telegram
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -523,7 +740,7 @@ function StreamDetail({ id }: { id: string }) {
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
-      {/* Back + Copy link */}
+      {/* Back + Share */}
       <div className="flex items-center justify-between">
         <Link
           href="/app"
@@ -532,7 +749,7 @@ function StreamDetail({ id }: { id: string }) {
           <ArrowLeft className="size-4" />
           Dashboard
         </Link>
-        <CopyLinkButton />
+        <ShareButtons streamId={stream.id} />
       </div>
 
       {/* Connect prompt for unauthenticated visitors */}
@@ -673,19 +890,22 @@ function StreamDetail({ id }: { id: string }) {
           <CopyableAddress address={stream.recipient} href={explorerUrl('account', stream.recipient)} />
         </DetailRow>
         <DetailRow label="Token">
-          <span className="inline-flex items-center gap-1.5">
-            <span className="font-mono">{stream.token.symbol}</span>
-            <a
+          <div className="flex items-center gap-2">
+            <span className="font-mono font-medium">{stream.token.symbol}</span>
+            <CopyableAddress
+              address={stream.token.address}
               href={explorerUrl('contract', stream.token.address)}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-muted-foreground hover:text-primary transition-colors"
-              aria-label="View token contract on Stellar Expert"
-            >
-              <ExternalLink className="size-3.5" />
-            </a>
-          </span>
+            />
+          </div>
         </DetailRow>
+        {STREAM_CONTRACT_ID && (
+          <DetailRow label="Stream Contract">
+            <CopyableAddress
+              address={STREAM_CONTRACT_ID}
+              href={explorerUrl('contract', STREAM_CONTRACT_ID)}
+            />
+          </DetailRow>
+        )}
         <DetailRow label="Total deposited">
           <TokenAmount amount={stream.depositedAmount} token={stream.token} maxFractionDigits={4} />
         </DetailRow>
