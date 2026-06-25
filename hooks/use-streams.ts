@@ -36,10 +36,18 @@ export interface CategorizedStreams {
   refetch: () => void
 }
 
-export function useStreams(): CategorizedStreams {
+interface UseStreamsOptions {
+  enablePolling?: boolean
+  pollInterval?: number
+}
+
+export function useStreams(options?: UseStreamsOptions): CategorizedStreams {
   const { address } = useWallet()
   const [streams, setStreams] = useState<StreamData[]>([])
   const [loading, setLoading] = useState(false)
+  const pollIntervalRef = useRef<NodeJS.Timeout | null>(null)
+
+  const { enablePolling = true, pollInterval = 30000 } = options ?? {}
 
   const fetch = useCallback(async () => {
     if (!address) { setStreams([]); return }
@@ -59,6 +67,27 @@ export function useStreams(): CategorizedStreams {
 
   // Re-fetch when a write invalidates the cache
   useInvalidation(fetch)
+
+  // Set up polling for real-time updates
+  useEffect(() => {
+    if (!enablePolling || !address) {
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current)
+        pollIntervalRef.current = null
+      }
+      return
+    }
+
+    // Poll for dashboard updates
+    pollIntervalRef.current = setInterval(fetch, pollInterval)
+
+    return () => {
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current)
+        pollIntervalRef.current = null
+      }
+    }
+  }, [enablePolling, address, fetch, pollInterval])
 
   const sent = streams.filter((s) => s.sender === address)
   const received = streams.filter((s) => s.recipient === address)
