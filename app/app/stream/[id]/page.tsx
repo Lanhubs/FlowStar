@@ -55,6 +55,7 @@ import { explorerUrl } from '@/lib/stellar'
 import { useNetwork } from '@/components/providers/network-provider'
 import { useAutoWithdraw } from '@/hooks/use-auto-withdraw'
 import { UnlockChart } from '@/components/streams/unlock-chart'
+import { StreamTimeline } from '@/components/streams/stream-timeline'
 import { bumpStreamTtl } from '@/lib/contract'
 
 // ─── Address copy button ────────────────────────────────────────────────────
@@ -976,6 +977,9 @@ function StreamDetail({ id }: { id: string }) {
           <span className="capitalize">{network}</span>
         </DetailRow>
       </div>
+
+      {/* Transaction history timeline */}
+      <StreamTimeline streamId={stream.id} />
 
       {/* Auto-withdraw (recipients only, active streams) */}
       {isRecipient && !stream.cancelled && status !== 'completed' && (
