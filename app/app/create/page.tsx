@@ -1,8 +1,8 @@
 'use client'
 
 import { useState, useCallback, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
-import { AlertTriangle, ArrowLeft, ArrowRight, Info, Loader2 } from 'lucide-react'
+import { useRouter, useSearchParams } from 'next/navigation'
+import { AlertTriangle, ArrowLeft, ArrowRight, Info, Loader2, Copy } from 'lucide-react'
 import Link from 'next/link'
 import { toast } from 'sonner'
 import { StrKey } from '@stellar/stellar-sdk'
@@ -25,7 +25,6 @@ import { getTokenMetadata, getTokenBalance } from '@/lib/contract'
 import { parseTokenAmount, formatTokenAmount } from '@/lib/stream-utils'
 import { StreamPreview } from '@/components/streams/stream-preview'
 import { CreateConfirmation } from '@/components/streams/create-confirmation'
-import { StreamTemplates, type StreamTemplate } from '@/components/streams/stream-templates'
 import type { TokenInfo } from '@/types/stream'
 
 const CUSTOM_VALUE = '__custom__'
@@ -71,6 +70,8 @@ interface FormState {
 
 function CreateForm() {
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const cloneId = searchParams.get('clone')
   const { address: walletAddress } = useWallet()
   const { network } = useNetwork()
   const { createStream, estimateFee, pending, error } = useContract()
@@ -92,19 +93,31 @@ function CreateForm() {
   const defaultStart = localDatetimeMin(60)
   const defaultEnd = localDatetimeMin(60 + 30 * 24 * 3600)
 
-  const [form, setForm] = useState<FormState>({
-    recipient: '',
-    tokenAddress: tokens[0]?.address ?? '',
-    amount: '',
-    startDate: defaultStart,
-    endDate: defaultEnd,
-    hasCliff: false,
-    cliffDate: defaultStart,
-    cliffAmount: '',
+  const [form, setForm] = useState<FormState>(() => {
+    const newStart = localDatetimeMin(60)
+    const durationSecs = searchParams.get('duration')
+    const cliffSecs = searchParams.get('cliff')
+    const hasCliff = cliffSecs !== null && cliffSecs !== '0'
+    const newEnd = durationSecs
+      ? addDuration(newStart, Number(durationSecs))
+      : localDatetimeMin(60 + 30 * 24 * 3600)
+    const newCliff = hasCliff && cliffSecs
+      ? addDuration(newStart, Number(cliffSecs))
+      : newStart
+
+    return {
+      recipient: searchParams.get('recipient') ?? '',
+      tokenAddress: searchParams.get('token') ?? (tokens[0]?.address ?? ''),
+      amount: searchParams.get('amount') ?? '',
+      startDate: newStart,
+      endDate: newEnd,
+      hasCliff,
+      cliffDate: newCliff,
+      cliffAmount: searchParams.get('cliffAmount') ?? '',
+    }
   })
 
   const [errors, setErrors] = useState<Partial<Record<keyof FormState, string>>>({})
-  const [selectedTemplateId, setSelectedTemplateId] = useState<string | undefined>(undefined)
 
   const selectedToken = isCustom && customToken
     ? customToken
@@ -242,30 +255,6 @@ function CreateForm() {
     }
   }
 
-  function handleTemplateSelect(template: StreamTemplate) {
-    setSelectedTemplateId(template.id)
-    const newStart = localDatetimeMin(60)
-    const newEnd = addDuration(newStart, template.durationSeconds)
-    const hasCliff = template.cliffSeconds > 0
-    const newCliff = hasCliff ? addDuration(newStart, template.cliffSeconds) : newStart
-
-    setForm((prev) => {
-      const amount = prev.amount
-      const cliffAmount = hasCliff && template.cliffPercent > 0 && amount
-        ? String(Math.floor(Number(amount) * template.cliffPercent / 100))
-        : ''
-      return {
-        ...prev,
-        startDate: newStart,
-        endDate: newEnd,
-        hasCliff,
-        cliffDate: newCliff,
-        cliffAmount,
-      }
-    })
-    setErrors({})
-  }
-
   const input = showConfirmation ? buildInput() : null
   const durationSeconds = (new Date(form.endDate).getTime() - new Date(form.startDate).getTime()) / 1000
   const amountPerSecond = input && durationSeconds > 0
@@ -290,9 +279,14 @@ function CreateForm() {
         </p>
       </div>
 
-      <div className="mt-8 rounded-2xl border border-border bg-card p-5">
-        <StreamTemplates onSelect={handleTemplateSelect} selectedId={selectedTemplateId} />
-      </div>
+      {cloneId && (
+        <div className="mt-4 flex items-center gap-2.5 rounded-xl border border-primary/30 bg-primary/5 px-4 py-3">
+          <Copy className="size-4 shrink-0 text-primary" />
+          <p className="text-sm text-primary">
+            Duplicating Stream #{cloneId} — form pre-filled with its parameters.
+          </p>
+        </div>
+      )}
 
       <div className="mt-6 grid gap-8 lg:grid-cols-[1fr_320px]">
       <form onSubmit={handleSubmit} className="space-y-6">
