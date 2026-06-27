@@ -1,13 +1,12 @@
 'use client'
 
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { AlertTriangle, ArrowLeft, ArrowRight, Info, Loader2, Copy } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, ArrowRight, Info, Loader2, Copy, Clock } from 'lucide-react'
 import Link from 'next/link'
 import { toast } from 'sonner'
 import { StrKey } from '@stellar/stellar-sdk'
 import { RequireWallet } from '@/components/layout/require-wallet'
-import { useNetwork } from '@/components/providers/network-provider'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -28,6 +27,7 @@ import { CreateConfirmation } from '@/components/streams/create-confirmation'
 import { TxPreviewDialog } from '@/components/ui/tx-preview-dialog'
 import { addAddressBookEntry, getAddressBookEntries, touchAddressBookEntry } from '@/lib/address-book'
 import { buildNextRunAt, saveRecurringRule, type RecurrenceCadence } from '@/lib/recurring'
+import { useFormDraft, clearExpiredDrafts } from '@/hooks/use-form-draft'
 import { StreamTemplates, type StreamTemplate } from '@/components/streams/stream-templates'
 import type { TokenInfo } from '@/types/stream'
 
@@ -39,13 +39,50 @@ function toUnixSeconds(localDatetimeValue: string): bigint {
 
 function localDatetimeMin(offsetSeconds = 0): string {
   const d = new Date(Date.now() + offsetSeconds * 1000)
-  return d.toISOString().slice(0, 16)
+  // Format as YYYY-MM-DDTHH:mm in local time (not UTC)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
 function addDuration(baseDatetime: string, seconds: number): string {
   const base = new Date(baseDatetime)
-  return new Date(base.getTime() + seconds * 1000).toISOString().slice(0, 16)
+  const d = new Date(base.getTime() + seconds * 1000)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
+
+function detectTimezone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone
+  } catch {
+    return 'UTC'
+  }
+}
+
+function getTimezoneOffset(): string {
+  const offset = -new Date().getTimezoneOffset()
+  const sign = offset >= 0 ? '+' : '-'
+  const h = Math.floor(Math.abs(offset) / 60)
+  const m = Math.abs(offset) % 60
+  return `UTC${sign}${h}${m > 0 ? `:${String(m).padStart(2, '0')}` : ''}`
+}
+
+const COMMON_TIMEZONES = [
+  'UTC',
+  'America/New_York',
+  'America/Chicago',
+  'America/Denver',
+  'America/Los_Angeles',
+  'America/Sao_Paulo',
+  'Europe/London',
+  'Europe/Paris',
+  'Europe/Berlin',
+  'Asia/Dubai',
+  'Asia/Kolkata',
+  'Asia/Singapore',
+  'Asia/Tokyo',
+  'Australia/Sydney',
+] as const
 
 const DURATION_PRESETS = [
   { label: '1 week', seconds: 7 * 24 * 3600 },
@@ -127,6 +164,15 @@ function CreateForm() {
   const [errors, setErrors] = useState<Partial<Record<keyof FormState, string>>>({})
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | undefined>(undefined)
 
+  // Issue #168: draft state
+  const [showDraftBanner, setShowDraftBanner] = useState(false)
+  const [draftSavedAt, setDraftSavedAt] = useState<number | null>(null)
+  const isFirstMount = useRef(true)
+
+  // Issue #170: timezone state
+  const [selectedTimezone, setSelectedTimezone] = useState(() => detectTimezone())
+  const timezoneOffset = getTimezoneOffset()
+
   const selectedToken = isCustom && customToken
     ? customToken
     : tokens.find((t) => t.address === form.tokenAddress) ?? tokens[0]
@@ -141,6 +187,29 @@ function CreateForm() {
       .catch(() => setTokenBalance(null))
       .finally(() => setBalanceLoading(false))
   }, [selectedToken?.address, walletAddress])
+
+  // Issue #168: wire up draft hook
+  const { loadDraft, restore, discard } = useFormDraft(
+    `create-stream-${walletAddress ?? 'anonymous'}`,
+    form,
+    (draft) => {
+      setForm(draft)
+    },
+    true,
+  )
+
+  // Check for existing draft on first mount
+  useEffect(() => {
+    if (!isFirstMount.current) return
+    isFirstMount.current = false
+    clearExpiredDrafts()
+    const entry = loadDraft()
+    if (entry) {
+      setDraftSavedAt(entry.savedAt)
+      setShowDraftBanner(true)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   async function handleCustomTokenLookup() {
     if (!customAddress || customAddress.length < 56) {
@@ -271,6 +340,7 @@ function CreateForm() {
         })
       }
 
+      discard()
       setShowConfirmation(false)
       toast.success('Stream created', { description: `Stream #${id} is live.` })
       router.push(`/app/stream/${id}`)
@@ -336,6 +406,45 @@ function CreateForm() {
           <p className="text-sm text-primary">
             Duplicating Stream #{cloneId} — form pre-filled with its parameters.
           </p>
+        </div>
+      )}
+
+      {/* Issue #168: Draft restore banner */}
+      {showDraftBanner && (
+        <div className="mt-4 flex items-center justify-between gap-3 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3">
+          <div className="flex items-center gap-2.5">
+            <Clock className="size-4 shrink-0 text-amber-600 dark:text-amber-400" />
+            <p className="text-sm text-amber-700 dark:text-amber-300">
+              You have an unsaved draft from{' '}
+              {draftSavedAt
+                ? new Date(draftSavedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                : 'earlier'}
+              .
+            </p>
+          </div>
+          <div className="flex gap-2 shrink-0">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                restore()
+                setShowDraftBanner(false)
+                toast.success('Draft restored')
+              }}
+            >
+              Restore
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                discard()
+                setShowDraftBanner(false)
+              }}
+            >
+              Discard
+            </Button>
+          </div>
         </div>
       )}
 
@@ -519,9 +628,31 @@ function CreateForm() {
             Schedule
           </h2>
 
+          {/* Issue #170: timezone selector */}
+          <div className="space-y-1.5">
+            <Label htmlFor="timezone" className="text-xs text-muted-foreground">
+              Timezone — dates below are interpreted in this timezone ({timezoneOffset})
+            </Label>
+            <Select value={selectedTimezone} onValueChange={setSelectedTimezone}>
+              <SelectTrigger id="timezone" className="w-full text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {COMMON_TIMEZONES.map((tz) => (
+                  <SelectItem key={tz} value={tz} className="text-xs">
+                    {tz}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-1.5">
-              <Label htmlFor="startDate">Start date</Label>
+              <Label htmlFor="startDate">
+                Start date{' '}
+                <span className="font-normal text-muted-foreground text-xs">({timezoneOffset})</span>
+              </Label>
               <Input
                 id="startDate"
                 type="datetime-local"
@@ -531,7 +662,10 @@ function CreateForm() {
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="endDate">End date</Label>
+              <Label htmlFor="endDate">
+                End date{' '}
+                <span className="font-normal text-muted-foreground text-xs">({timezoneOffset})</span>
+              </Label>
               <Input
                 id="endDate"
                 type="datetime-local"
@@ -624,7 +758,10 @@ function CreateForm() {
             </div>
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-1.5">
-                <Label htmlFor="cliffDate">Cliff date</Label>
+                <Label htmlFor="cliffDate">
+                  Cliff date{' '}
+                  <span className="font-normal text-muted-foreground text-xs">({timezoneOffset})</span>
+                </Label>
                 <Input
                   id="cliffDate"
                   type="datetime-local"
