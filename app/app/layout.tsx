@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import type { Metadata } from 'next'
 import { Navbar } from '@/components/layout/navbar'
+import { Breadcrumb } from '@/components/layout/breadcrumb'
 import { MockModeBanner } from '@/components/layout/mock-mode-banner'
 
 export const metadata: Metadata = {
@@ -18,6 +19,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
         Skip to content
       </a>
       <Navbar />
+      <Breadcrumb />
       <main
         id="main-content"
         className="mx-auto w-full max-w-6xl flex-1 px-4 py-8 sm:px-6 sm:py-10"
