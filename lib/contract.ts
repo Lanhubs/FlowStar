@@ -110,6 +110,8 @@ async function buildAndSimulate(
   return { prepared, estimatedFee, minFee }
 }
 
+export type TxStep = 'simulating' | 'signing' | 'submitting' | 'confirming'
+
 /** Build, simulate, sign, and submit a contract call. Returns the transaction hash. */
 async function invoke(
   network: NetworkName,
@@ -117,10 +119,14 @@ async function invoke(
   args: xdr.ScVal[],
   signerAddress: string,
   contractAddress: string,
+  onStep?: (step: TxStep) => void,
 ): Promise<string> {
   const config = getNetworkConfig(network)
+  onStep?.('simulating')
   const { prepared } = await buildAndSimulate(network, method, args, signerAddress, contractAddress)
+  onStep?.('signing')
   const signedXdr = await signTx(prepared.toXDR())
+  onStep?.('submitting')
   // Submit the signed XDR directly via the RPC JSON-RPC endpoint.
   // We bypass TransactionBuilder.fromXDR because Freighter may return a
   // FeeBumpTransaction envelope (type 4) which fromXDR can't handle.
@@ -150,6 +156,7 @@ async function invoke(
 
   // Poll until finalized (max 60 s)
   const hash = sendResult.hash
+  onStep?.('confirming')
   let pollStatus = 'PENDING'
   const pollDeadline = Date.now() + POLL_TIMEOUT_MS
 
@@ -297,6 +304,7 @@ export async function createStream(
   input: CreateStreamInput,
   sender: string,
   network: NetworkName = 'testnet',
+  onStep?: (step: TxStep) => void,
 ): Promise<string> {
   const config = getNetworkConfig(network)
   const isMockMode = !config.streamContractId
@@ -323,6 +331,7 @@ export async function createStream(
     ],
     sender,
     input.token.address, // invoke on the token contract, not the streaming contract
+    onStep,
   )
 
   // Step 2: create the stream.
@@ -349,6 +358,7 @@ export async function createStream(
     [new Address(sender).toScVal(), params],
     sender,
     config.streamContractId,
+    onStep,
   )
 
   // SDK v13 can't parse TransactionMetaV4 (protocol 22+) so returnValue is void.
@@ -364,6 +374,7 @@ export async function withdrawFromStream(
   id: string,
   amount: bigint,
   network: NetworkName = 'testnet',
+  onStep?: (step: TxStep) => void,
 ): Promise<string | null> {
   const config = getNetworkConfig(network)
   const isMockMode = !config.streamContractId
@@ -385,12 +396,14 @@ export async function withdrawFromStream(
     ],
     stream.recipient,
     config.streamContractId,
+    onStep,
   )
 }
 
 export async function cancelStream(
   id: string,
   network: NetworkName = 'testnet',
+  onStep?: (step: TxStep) => void,
 ): Promise<string | null> {
   const config = getNetworkConfig(network)
   const isMockMode = !config.streamContractId
@@ -409,6 +422,7 @@ export async function cancelStream(
     [nativeToScVal(BigInt(id), { type: 'u64' })],
     stream.sender,
     config.streamContractId,
+    onStep,
   )
 }
 

@@ -36,6 +36,8 @@ interface WalletContextValue {
   connecting: boolean
   reconnecting: boolean
   isConnected: boolean
+  networkMismatch: boolean
+  walletNetwork: string | null
   connect: (walletId: string) => Promise<void>
   disconnect: () => void
   signTransaction: (xdr: string, network?: NetworkName) => Promise<string>
@@ -51,23 +53,30 @@ async function connectFreighter(): Promise<string> {
   if (!connected.isConnected) {
     throw new Error('Freighter is not installed. Please install the Freighter extension.')
   }
-  // Request access prompts the user to approve
   await requestAccess()
   const result = await getAddress()
   if (result.error) throw new Error(result.error)
   return result.address
 }
 
+async function getFreighterNetwork(): Promise<string | null> {
+  try {
+    const { getNetwork } = await import('@stellar/freighter-api')
+    const result = await getNetwork()
+    if (result.error) return null
+    return result.network ?? null
+  } catch {
+    return null
+  }
+}
+
 async function signWithFreighter(xdr: string, networkPassphrase: string): Promise<string> {
   const { signTransaction } = await import('@stellar/freighter-api')
-  const result = await signTransaction(xdr, {
-    networkPassphrase,
-  })
+  const result = await signTransaction(xdr, { networkPassphrase })
   if (result.error) throw new Error(result.error)
   return result.signedTxXdr
 }
 
-// Stubs for wallets that need a dedicated SDK — shows a helpful message
 async function connectStub(name: string): Promise<string> {
   throw new Error(
     `${name} connection requires the ${name} browser extension. Install it and refresh.`,
@@ -84,6 +93,14 @@ async function connectWallet(id: string): Promise<string> {
   }
 }
 
+// Maps Freighter network names → our NetworkName
+function normalizeFreighterNetwork(raw: string): NetworkName | null {
+  const lower = raw.toLowerCase()
+  if (lower.includes('test')) return 'testnet'
+  if (lower === 'mainnet' || lower === 'public' || lower.includes('public')) return 'mainnet'
+  return null
+}
+
 // ─── Provider ─────────────────────────────────────────────────────────────────
 
 export function WalletProvider({ children }: { children: ReactNode }) {
@@ -91,6 +108,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const [walletId, setWalletId] = useState<string | null>(null)
   const [connecting, setConnecting] = useState(false)
   const [reconnecting, setReconnecting] = useState(true)
+  const [walletNetwork, setWalletNetwork] = useState<string | null>(null)
   const { network } = useNetwork()
 
   // Auto-reconnect on mount using persisted walletId
@@ -103,6 +121,29 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       .finally(() => setReconnecting(false))
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Poll Freighter's active network while connected
+  useEffect(() => {
+    if (!address || walletId !== 'freighter') {
+      setWalletNetwork(null)
+      return
+    }
+    let cancelled = false
+    const check = () => {
+      getFreighterNetwork().then((net) => {
+        if (!cancelled) setWalletNetwork(net)
+      })
+    }
+    check()
+    const interval = setInterval(check, 5000)
+    return () => { cancelled = true; clearInterval(interval) }
+  }, [address, walletId])
+
+  const networkMismatch = useMemo(() => {
+    if (!address || walletId !== 'freighter' || !walletNetwork) return false
+    const normalized = normalizeFreighterNetwork(walletNetwork)
+    return normalized !== null && normalized !== network
+  }, [address, walletId, walletNetwork, network])
 
   const connect = useCallback(async (id: string) => {
     setConnecting(true)
@@ -119,6 +160,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const disconnect = useCallback(() => {
     setAddress(null)
     setWalletId(null)
+    setWalletNetwork(null)
     localStorage.removeItem('walletId')
   }, [])
 
@@ -146,11 +188,13 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       connecting,
       reconnecting,
       isConnected: address !== null,
+      networkMismatch,
+      walletNetwork,
       connect,
       disconnect,
       signTransaction,
     }),
-    [address, walletId, connecting, reconnecting, connect, disconnect, signTransaction],
+    [address, walletId, connecting, reconnecting, networkMismatch, walletNetwork, connect, disconnect, signTransaction],
   )
 
   return <WalletContext.Provider value={value}>{children}</WalletContext.Provider>
